@@ -8016,21 +8016,6 @@ static void save_cmdline(u32 argc, char** argv) {
 }
 
 
-
-void __hello_world(void) {
-  printf("Hello from pyAFL!\n");
-}
-
-
-void __print(char *str) {
-  printf("pyAFL: %s",str);
-}
-
-
-
-
-
-
 #ifndef AFL_LIB
 
 /* Main entry point */

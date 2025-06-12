@@ -1,0 +1,23 @@
+{
+    "name" : "openssl",
+    "protocol": "TLS",
+    "exec_tmout": "5000+",
+    "mem_limit": "none",
+    "skip_deterministic": "True",
+    "crash_mode" : "False",
+    "use_net": "tcp://127.0.0.1/4433",
+    "server_wait": "10000",
+    "socket_timeout": "100",
+    "terminate_child": "True",
+    "state_aware_mode": "True",
+    "region_level_mutation": "True",
+    "target_cmd": "/home/ju/Desktop/exp/openssl/apps/openssl s_server -key key.pem -cert cert.pem -4 -naccept 1 -no_anti_replay",
+
+
+    "no_forkserver": "False",
+    "no_cpu_meter_red": "False",
+    "fast_cal": "False"
+
+
+
+}

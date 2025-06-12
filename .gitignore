@@ -1,3 +1,7 @@
+# pyafl
+build/*
+pyafl.cpython-38-x86_64-linux-gnu.so
+pyafl.c
 # Binaries produced by "make".
 afl-analyze
 afl-as
