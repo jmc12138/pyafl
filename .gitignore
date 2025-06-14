@@ -2,6 +2,9 @@
 build/*
 pyafl.cpython-38-x86_64-linux-gnu.so
 pyafl.c
+session.log
+session.pcap
+__pycache__
 # Binaries produced by "make".
 afl-analyze
 afl-as
@@ -13,6 +16,7 @@ afl-gcc
 afl-gotcpu
 afl-showmap
 afl-tmin
+afl-python
 as
 
 # Binaries produced by "make -C llvm_mode"

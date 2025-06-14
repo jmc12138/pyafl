@@ -1,18 +1,32 @@
 import pyafl
-
-# 如果你在 libafl.pyx 中定义了 hello_world()
-pyafl.hello_world()
-pyafl.print("1111111111\n")
+import json
+from Fuzzer import Fuzzer
 
 
 path = "conf.json"
 
-with open(path,'r') as f:
-    data = f.read()
+fuzzer = Fuzzer(path)
 
-# print(data)
+# fuzzer.print_test_cases()
+# fuzzer.get_test_case_detail(1)
+test_cases = fuzzer.get_init_test_cases()
 
-# a = pyafl.read_json(data)
-# a = pyafl.init(data,1)
 
-# print(a)
+# pyafl.pre_run_target(100)
+messages, responses = fuzzer.run_target(test_cases[0])
+
+fuzzer.calibrate_case(test_cases[0])
+
+
+print(len(messages))
+print(len(responses))
+fuzzer.mr_log(messages, responses)
+
+fuzzer.save_pcap(messages,responses)
+
+
+fuzzer.perform_dry_run()
+
+fuzzer.fuzz()
+
+fuzzer.clear()

@@ -358,9 +358,6 @@ EXP_ST u8 *cleanup_script; /* script to clean up the environment of the SUT -- m
 
 //flags
 u8 use_net = 0;
-u8 server_wait = 0;
-u8 poll_wait = 0;
-u8 socket_timeout = 0;
 u8 terminate_child = 0;
 
 
@@ -371,10 +368,17 @@ char *target_cmd[MAX_STR_LEN];
 char target_cmd_len = 0;
 char name[MAX_STR_LEN] = {0};
 
-int verbose = 1;
+int verbose = 0;
 
 char * global_buf;
 int global_buf_len = 0;
+
+char * global_response_buf;
+int global_response_buf_len = 0;
+
+int global_sockfd = -1;
+
+struct itimerval global_run_target_time_it;
 
 static u64 get_cur_time(void);
 
@@ -8040,6 +8044,11 @@ void __print(char *str) {
 }
 
 
+void __debug(){
+  verbose = 1;
+}
+
+
 int __parse_args(const char *json_str){
 
     u8  mem_limit_given = 0;
@@ -8058,6 +8067,13 @@ int __parse_args(const char *json_str){
     /* 处理JSON配置 */
     cJSON *item;
     
+
+        /* out dir */
+    if ((item = cJSON_GetObjectItem(root, "output_dir")) != NULL) {
+
+        out_dir = strdup(item->valuestring);
+        if (verbose) OKF("out_dir: %s ", out_dir);
+    }
 
     /* 执行超时 */
     if ((item = cJSON_GetObjectItem(root, "exec_tmout")) != NULL) {
@@ -8138,16 +8154,14 @@ int __parse_args(const char *json_str){
     if ((item = cJSON_GetObjectItem(root, "server_wait")) != NULL) {
         if (sscanf(item->valuestring, "%u", &server_wait_usecs) < 1 || 
             item->valuestring[0] == '-') FATAL("Bad syntax used for server_wait");
-        server_wait = 1;
         if (verbose) OKF("Server wait: %u us", server_wait_usecs);
     }
 
     /* 套接字超时 */
-    if ((item = cJSON_GetObjectItem(root, "socket_timeout")) != NULL) {
-        if (sscanf(item->valuestring, "%u", &socket_timeout_usecs) < 1 || 
-            item->valuestring[0] == '-') FATAL("Bad syntax used for socket_timeout");
-        socket_timeout = 1;
-        if (verbose) OKF("Socket timeout: %u us", socket_timeout_usecs);
+    if ((item = cJSON_GetObjectItem(root, "poll_wait_msecs")) != NULL) {
+        if (sscanf(item->valuestring, "%u", &poll_wait_msecs) < 1) FATAL("Bad syntax used for socket_timeout");
+
+        if (verbose) OKF("poll_wait_msecs: %u us", poll_wait_msecs);
     }
 
     /* 终止子进程 */
@@ -8227,6 +8241,12 @@ void __clear(){
   if (global_buf){
     free(global_buf);
   }
+   if (out_dir){
+    free(out_dir);
+  } 
+  // if (global_response_buf){
+  //   free(global_response_buf);
+  // }
 }
 
 void __set_up(){
@@ -8265,6 +8285,10 @@ void __set_up(){
   if (getenv("AFL_LD_PRELOAD"))
     FATAL("Use AFL_PRELOAD instead of AFL_LD_PRELOAD");
 
+  fix_up_banner(target_cmd);
+
+  check_if_tty();
+
   get_core_count();
 
   #ifdef HAVE_AFFINITY
@@ -8279,13 +8303,17 @@ void __set_up(){
   setup_shm();
   init_count_class16();
 
+
+  setup_dirs_fds();
+
   if (!timeout_given) find_timeout();
   // printf("%s",target_cmd[0]);
   
   check_binary(target_cmd[0]);
 
   if (dumb_mode != 1 && !no_forkserver && !forksrv_pid)
-    init_forkserver(target_cmd);
+      init_forkserver(target_cmd);
+
 }
 
 void __get_test_case(const char *buf, size_t buf_len) {
@@ -8308,19 +8336,363 @@ void __get_test_case(const char *buf, size_t buf_len) {
     memmove(global_buf, buf, buf_len);  // 处理内存重叠情况
 
     // 5. 可选：调试日志
-    if (getenv("DEBUG_MEM")) {
-        fprintf(stderr, "[MEM] Updated buffer %p -> %p (%zu bytes)\n",
-                (void*)global_buf, (void*)new_buf, buf_len);
+    if (verbose) {
+        // fprintf(stderr, "[MEM] Updated buffer %p -> %p (%zu bytes)\n",
+        //         (void*)global_buf, (void*)new_buf, buf_len);
     }
 }
+
+char* __get_response_buf(){
+  return global_response_buf;
+}
+
+int __get_response_buf_len(){
+  int ret = global_response_buf_len;
+  global_response_buf_len = 0;
+  return ret;
+}
+
+
+int __pre_run_target(u32 timeout){
+
+
+  static u32 prev_timed_out = 0;
+  static u64 exec_ms = 0;
+
+  child_timed_out = 0;
+
+
+  /* After this memset, trace_bits[] are effectively volatile, so we
+     must prevent any earlier operations from venturing into that
+     territory. */
+
+  memset(trace_bits, 0, MAP_SIZE);
+  MEM_BARRIER();
+
+  /* If we're running in "dumb" mode, we can't rely on the fork server
+     logic compiled into the target program, so we will just keep calling
+     execve(). There is a bit of code duplication between here and 
+     init_forkserver(), but c'est la vie. */
+
+    if (dumb_mode == 1 || no_forkserver) {
+
+    child_pid = fork();
+
+    if (child_pid < 0) PFATAL("fork() failed");
+
+    if (!child_pid) {
+
+      struct rlimit r;
+
+      if (mem_limit) {
+
+        r.rlim_max = r.rlim_cur = ((rlim_t)mem_limit) << 20;
+
+#ifdef RLIMIT_AS
+
+        setrlimit(RLIMIT_AS, &r); /* Ignore errors */
+
+#else
+
+        setrlimit(RLIMIT_DATA, &r); /* Ignore errors */
+
+#endif /* ^RLIMIT_AS */
+
+      }
+
+      r.rlim_max = r.rlim_cur = 0;
+
+      setrlimit(RLIMIT_CORE, &r); /* Ignore errors */
+
+      /* Isolate the process and configure standard descriptors. If out_file is
+         specified, stdin is /dev/null; otherwise, out_fd is cloned instead. */
+
+      setsid();
+
+      dup2(dev_null_fd, 1);
+      dup2(dev_null_fd, 2);
+
+      if (out_file) {
+
+        dup2(dev_null_fd, 0);
+
+      } else {
+
+        dup2(out_fd, 0);
+        close(out_fd);
+
+      }
+
+      /* On Linux, would be faster to use O_CLOEXEC. Maybe TODO. */
+
+      close(dev_null_fd);
+      close(out_dir_fd);
+      close(dev_urandom_fd);
+      close(fileno(plot_file));
+
+      /* Set sane defaults for ASAN if nothing else specified. */
+
+      setenv("ASAN_OPTIONS", "abort_on_error=1:"
+                             "detect_leaks=0:"
+                             "symbolize=0:"
+                             "allocator_may_return_null=1", 0);
+
+      setenv("MSAN_OPTIONS", "exit_code=" STRINGIFY(MSAN_ERROR) ":"
+                             "symbolize=0:"
+                             "msan_track_origins=0", 0);
+
+      execv(target_path, target_cmd);
+
+      /* Use a distinctive bitmap value to tell the parent about execv()
+         falling through. */
+
+      *(u32*)trace_bits = EXEC_FAIL_SIG;
+      exit(0);
+
+    }
+
+  } else {
+
+    s32 res;
+
+    /* In non-dumb mode, we have the fork server up and running, so simply
+       tell it to have at it, and then read back PID. */
+
+    if ((res = write(fsrv_ctl_fd, &prev_timed_out, 4)) != 4) {
+
+      if (stop_soon) return 0;
+      RPFATAL(res, "Unable to request new process from fork server (OOM?)");
+
+    }
+
+    if ((res = read(fsrv_st_fd, &child_pid, 4)) != 4) {
+
+      if (stop_soon) return 0;
+      RPFATAL(res, "Unable to request new process from fork server (OOM?)");
+
+    }
+
+    if (child_pid <= 0) FATAL("Fork server is misbehaving (OOM?)");
+
+  }
+
+    /* Configure timeout, as requested by user, then wait for child to terminate. */
+
+  global_run_target_time_it.it_value.tv_sec = (timeout / 1000);
+  global_run_target_time_it.it_value.tv_usec = (timeout % 1000) * 1000;
+
+  setitimer(ITIMER_REAL, &global_run_target_time_it, NULL);
+
+  int n;
+  struct sockaddr_in serv_addr;
+
+  //Clean up the server if needed
+  if (cleanup_script) system(cleanup_script);
+
+  //Wait a bit for the server initialization
+  usleep(server_wait_usecs);
+
+  //Create a TCP/UDP socket
+  if (net_protocol == PRO_TCP)
+    global_sockfd = socket(AF_INET, SOCK_STREAM, 0);
+  else if (net_protocol == PRO_UDP)
+    global_sockfd = socket(AF_INET, SOCK_DGRAM, 0);
+
+  if (global_sockfd < 0) {
+    PFATAL("Cannot create a socket");
+  }
+
+  //Set timeout for socket data sending/receiving -- otherwise it causes a big delay
+  //if the server is still alive after processing all the requests
+  struct timeval socket_timeout;
+  socket_timeout.tv_sec = 0;
+  socket_timeout.tv_usec = socket_timeout_usecs;
+  setsockopt(global_sockfd, SOL_SOCKET, SO_SNDTIMEO, (char *)&socket_timeout, sizeof(socket_timeout));
+
+  memset(&serv_addr, '0', sizeof(serv_addr));
+
+  serv_addr.sin_family = AF_INET;
+  serv_addr.sin_port = htons(net_port);
+  serv_addr.sin_addr.s_addr = inet_addr(net_ip);
+
+  if(connect(global_sockfd, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) < 0) {
+    //If it cannot connect to the server under test
+    //try it again as the server initial startup time is varied
+    for (n=0; n < 1000; n++) {
+      if (connect(global_sockfd, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) == 0) break;
+      usleep(1000);
+    }
+    if (n== 1000) {
+      close(global_sockfd);
+      return 1;
+    }
+  }
+
+
+  //retrieve early server response if needed
+  if (net_recv(global_sockfd, socket_timeout, poll_wait_msecs, &global_response_buf, &global_response_buf_len)) {
+
+      close(global_sockfd);
+
+      if (terminate_child && (child_pid > 0)) kill(child_pid, SIGTERM);
+
+      //give the server a bit more time to gracefully terminate
+      while(1) {
+        int status = kill(child_pid, 0);
+        if ((status != 0) && (errno == ESRCH)) break;
+      }
+      return 1;
+  }
+
+
+}
+
+
+
+void __run_target(){
+
+  int n;
+  struct timeval timeout;
+  timeout.tv_sec = 0;
+  timeout.tv_usec = socket_timeout_usecs;
+
+  n = net_send(global_sockfd, timeout, global_buf, global_buf_len);
+
+  net_recv(global_sockfd, timeout, poll_wait_msecs, &global_response_buf, &global_response_buf_len);
+
+}
+
+int __post_run_target(u32 timeout){
+    int status = 0;
+
+
+    //wait a bit letting the server to complete its remaing task(s)
+    memset(session_virgin_bits, 255, MAP_SIZE);
+    while(1) {
+      if (has_new_bits(session_virgin_bits) != 2) break;
+    }
+
+    close(global_sockfd);
+
+    if (terminate_child && (child_pid > 0)) kill(child_pid, SIGTERM);
+
+    //give the server a bit more time to gracefully terminate
+    while(1) {
+      int status = kill(child_pid, 0);
+      if ((status != 0) && (errno == ESRCH)) break;
+    }
+
+
+      if (dumb_mode == 1 || no_forkserver) {
+    if (waitpid(child_pid, &status, 0) <= 0) PFATAL("waitpid() failed");
+
+  } else {
+      s32 res;
+
+      if ((res = read(fsrv_st_fd, &status, 4)) != 4) {
+
+      if (stop_soon) return 0;
+      RPFATAL(res, "Unable to communicate with fork server (OOM?)");
+
+    }
+
+  }
+  
+  if (!WIFSTOPPED(status)) child_pid = 0;
+
+  static u32 prev_timed_out = 0;
+  static u64 exec_ms = 0;
+  u32 tb4;
+
+
+  getitimer(ITIMER_REAL, &global_run_target_time_it);
+  exec_ms = (u64) timeout - (global_run_target_time_it.it_value.tv_sec * 1000 +
+                             global_run_target_time_it.it_value.tv_usec / 1000);
+
+  global_run_target_time_it.it_value.tv_sec = 0;
+  global_run_target_time_it.it_value.tv_usec = 0;
+
+  setitimer(ITIMER_REAL, &global_run_target_time_it, NULL);
+
+  total_execs++;
+
+  /* Any subsequent operations on trace_bits must not be moved by the
+     compiler below this point. Past this location, trace_bits[] behave
+     very normally and do not have to be treated as volatile. */
+
+  MEM_BARRIER();
+
+  tb4 = *(u32*)trace_bits;
+
+#ifdef WORD_SIZE_64
+  classify_counts((u64*)trace_bits);
+#else
+  classify_counts((u32*)trace_bits);
+#endif /* ^WORD_SIZE_64 */
+
+  prev_timed_out = child_timed_out;
+
+  /* Report outcome to caller. */
+
+  if (WIFSIGNALED(status) && !stop_soon) {
+
+    kill_signal = WTERMSIG(status);
+
+    if (child_timed_out && kill_signal == SIGKILL) return FAULT_TMOUT;
+
+    if (kill_signal == SIGTERM) return FAULT_NONE;
+
+    return FAULT_CRASH;
+
+  }
+
+  /* A somewhat nasty hack for MSAN, which doesn't support abort_on_error and
+     must use a special exit code. */
+
+  if (uses_asan && WEXITSTATUS(status) == MSAN_ERROR) {
+    kill_signal = 0;
+    return FAULT_CRASH;
+  }
+
+  if ((dumb_mode == 1 || no_forkserver) && tb4 == EXEC_FAIL_SIG)
+    return FAULT_ERROR;
+
+  /* It makes sense to account for the slowest units only if the testcase was run
+  under the user defined timeout. */
+  if (!(timeout > exec_tmout) && (slowest_exec_ms < exec_ms)) {
+    slowest_exec_ms = exec_ms;
+  }
+
+  return FAULT_NONE;
+}
+
+
+u32 __get_exec_tmout(){
+  return exec_tmout;
+}
+
+
+u32 __trace_bytes_count(){
+  return count_bytes(trace_bits);
+}
+
+u32 __var_bytes_count(){
+  return count_bytes(var_bytes);
+}
+
+u32 __trace_hash32(){
+  return  hash32(trace_bits, MAP_SIZE, HASH_CONST);
+}
+
 
 #ifndef AFL_LIB
 
 /* Main entry point */
+int main(int argc, char** argv){
 
-int main(int argc, char** argv) {
 
   s32 opt;
+
   u64 prev_queued = 0;
   u32 sync_interval_cnt = 0, seek_to;
   u8  *extras_dir = 0;
@@ -8328,435 +8700,52 @@ int main(int argc, char** argv) {
   u8  exit_1 = !!getenv("AFL_BENCH_JUST_ONE");
   char** use_argv;
 
-  struct timeval tv;
-  struct timezone tz;
-
-  SAYF(cCYA "afl-fuzz " cBRI VERSION cRST " by <lcamtuf@google.com>\n");
-
-  doc_path = access(DOC_PATH, F_OK) ? "docs" : DOC_PATH;
-
-  gettimeofday(&tv, &tz);
-  srandom(tv.tv_sec ^ tv.tv_usec ^ getpid());
-
-  while ((opt = getopt(argc, argv, "+i:o:f:m:t:T:dnCB:S:M:x:QN:D:W:w:Kc:")) > 0)
-
-    switch (opt) {
-
-      case 'i': /* input dir */
-
-        if (in_dir) FATAL("Multiple -i options not supported");
-        in_dir = optarg;
-
-        if (!strcmp(in_dir, "-")) in_place_resume = 1;
-
-        break;
-
-      case 'o': /* output dir */
-
-        if (out_dir) FATAL("Multiple -o options not supported");
-        out_dir = optarg;
-        break;
-
-      case 'M': { /* master sync ID */
-
-          u8* c;
-
-          if (sync_id) FATAL("Multiple -S or -M options not supported");
-          sync_id = ck_strdup(optarg);
-
-          if ((c = strchr(sync_id, ':'))) {
-
-            *c = 0;
-
-            if (sscanf(c + 1, "%u/%u", &master_id, &master_max) != 2 ||
-                !master_id || !master_max || master_id > master_max ||
-                master_max > 1000000) FATAL("Bogus master ID passed to -M");
-
-          }
-
-          force_deterministic = 1;
-
-        }
-
-        break;
-
-      case 'S': 
-
-        if (sync_id) FATAL("Multiple -S or -M options not supported");
-        sync_id = ck_strdup(optarg);
-        break;
-
-      case 'f': /* target file */
-
-        if (out_file) FATAL("Multiple -f options not supported");
-        out_file = optarg;
-        break;
-
-      case 'x': /* dictionary */
-
-        if (extras_dir) FATAL("Multiple -x options not supported");
-        extras_dir = optarg;
-        break;
-
-      case 't': { /* timeout */
-
-          u8 suffix = 0;
-
-          if (timeout_given) FATAL("Multiple -t options not supported");
-
-          if (sscanf(optarg, "%u%c", &exec_tmout, &suffix) < 1 ||
-              optarg[0] == '-') FATAL("Bad syntax used for -t");
-
-          if (exec_tmout < 5) FATAL("Dangerously low value of -t");
-
-          if (suffix == '+') timeout_given = 2; else timeout_given = 1;
-
-          break;
-
-      }
-
-      case 'm': { /* mem limit */
-
-          u8 suffix = 'M';
-
-          if (mem_limit_given) FATAL("Multiple -m options not supported");
-          mem_limit_given = 1;
-
-          if (!strcmp(optarg, "none")) {
-
-            mem_limit = 0;
-            break;
-
-          }
-
-          if (sscanf(optarg, "%llu%c", &mem_limit, &suffix) < 1 ||
-              optarg[0] == '-') FATAL("Bad syntax used for -m");
-
-          switch (suffix) {
-
-            case 'T': mem_limit *= 1024 * 1024; break;
-            case 'G': mem_limit *= 1024; break;
-            case 'k': mem_limit /= 1024; break;
-            case 'M': break;
-
-            default:  FATAL("Unsupported suffix or bad syntax for -m");
-
-          }
-
-          if (mem_limit < 5) FATAL("Dangerously low value of -m");
-
-          if (sizeof(rlim_t) == 4 && mem_limit > 2000)
-            FATAL("Value of -m out of range on 32-bit systems");
-
-        }
-
-        break;
-
-      case 'd': /* skip deterministic */
-
-        if (skip_deterministic) FATAL("Multiple -d options not supported");
-        skip_deterministic = 1;
-        use_splicing = 1;
-        break;
-
-      case 'B': /* load bitmap */
-
-        /* This is a secret undocumented option! It is useful if you find
-           an interesting test case during a normal fuzzing process, and want
-           to mutate it without rediscovering any of the test cases already
-           found during an earlier run.
-
-           To use this mode, you need to point -B to the fuzz_bitmap produced
-           by an earlier run for the exact same binary... and that's it.
-
-           I only used this once or twice to get variants of a particular
-           file, so I'm not making this an official setting. */
-
-        if (in_bitmap) FATAL("Multiple -B options not supported");
-
-        in_bitmap = optarg;
-        read_bitmap(in_bitmap);
-        break;
-
-      case 'C': /* crash mode */
-
-        if (crash_mode) FATAL("Multiple -C options not supported");
-        crash_mode = FAULT_CRASH;
-        break;
-
-      case 'n': /* dumb mode */
-
-        if (dumb_mode) FATAL("Multiple -n options not supported");
-        if (getenv("AFL_DUMB_FORKSRV")) dumb_mode = 2; else dumb_mode = 1;
-
-        break;
-
-      case 'T': /* banner */
-
-        if (use_banner) FATAL("Multiple -T options not supported");
-        use_banner = optarg;
-        break;
-
-      case 'Q': /* QEMU mode */
-
-        if (qemu_mode) FATAL("Multiple -Q options not supported");
-        qemu_mode = 1;
-
-        if (!mem_limit_given) mem_limit = MEM_LIMIT_QEMU;
-
-        break;
-
-      case 'N': /* Network configuration */
-        if (use_net) FATAL("Multiple -N options not supported");
-        if (parse_net_config(optarg, &net_protocol, &net_ip, &net_port)) FATAL("Bad syntax used for -N. Check the network setting. [tcp/udp]://127.0.0.1/port");
-
-        use_net = 1;
-        break;
-
-      case 'D': /* waiting time for the server initialization */
-        if (server_wait) FATAL("Multiple -D options not supported");
-
-        if (sscanf(optarg, "%u", &server_wait_usecs) < 1 || optarg[0] == '-') FATAL("Bad syntax used for -D");
-        server_wait = 1;
-        break;
-
-      case 'W': /* polling timeout determining maximum amount of time waited before concluding that no responses are forthcoming*/
-        if (socket_timeout) FATAL("Multiple -W options not supported");
-
-        if (sscanf(optarg, "%u", &poll_wait_msecs) < 1 || optarg[0] == '-') FATAL("Bad syntax used for -W");
-        poll_wait = 1;
-        break;
-
-      case 'w': /* receive/send socket timeout determining time waited for each response */
-        if (socket_timeout) FATAL("Multiple -w options not supported");
-
-        if (sscanf(optarg, "%u", &socket_timeout_usecs) < 1 || optarg[0] == '-') FATAL("Bad syntax used for -w");
-        socket_timeout = 1;
-        break;
-
-      case 'K':
-        if (terminate_child) FATAL("Multiple -K options not supported");
-        terminate_child = 1;
-        break;
-
-      case 'c': /* cleanup script */
-
-        if (cleanup_script) FATAL("Multiple -c options not supported");
-        cleanup_script = optarg;
-        break;
-
-      default:
-
-        usage(argv[0]);
-
-    }
-
-  if (optind == argc || !in_dir || !out_dir) usage(argv[0]);
-
-  setup_signal_handlers();
-  check_asan_opts();
-
-  if (sync_id) fix_up_sync();
-
-  if (!strcmp(in_dir, out_dir))
-    FATAL("Input and output directories can't be the same");
-
-  if (dumb_mode) {
-
-    if (crash_mode) FATAL("-C and -n are mutually exclusive");
-    if (qemu_mode)  FATAL("-Q and -n are mutually exclusive");
-
-  }
-
-  if (getenv("AFL_NO_FORKSRV"))    no_forkserver    = 1;
-  if (getenv("AFL_NO_CPU_RED"))    no_cpu_meter_red = 1;
-  if (getenv("AFL_NO_ARITH"))      no_arith         = 1;
-  if (getenv("AFL_SHUFFLE_QUEUE")) shuffle_queue    = 1;
-  if (getenv("AFL_FAST_CAL"))      fast_cal         = 1;
-
-  if (getenv("AFL_HANG_TMOUT")) {
-    hang_tmout = atoi(getenv("AFL_HANG_TMOUT"));
-    if (!hang_tmout) FATAL("Invalid value of AFL_HANG_TMOUT");
-  }
-
-  if (dumb_mode == 2 && no_forkserver)
-    FATAL("AFL_DUMB_FORKSRV and AFL_NO_FORKSRV are mutually exclusive");
-
-  if (getenv("AFL_PRELOAD")) {
-    setenv("LD_PRELOAD", getenv("AFL_PRELOAD"), 1);
-    setenv("DYLD_INSERT_LIBRARIES", getenv("AFL_PRELOAD"), 1);
-  }
-
-  if (getenv("AFL_LD_PRELOAD"))
-    FATAL("Use AFL_PRELOAD instead of AFL_LD_PRELOAD");
-
-  save_cmdline(argc, argv);
-
-  fix_up_banner(argv[optind]);
-
-  check_if_tty();
-
-  get_core_count();
-
-#ifdef HAVE_AFFINITY
-  bind_to_free_cpu();
-#endif /* HAVE_AFFINITY */
-
-  check_crash_handling();
-  check_cpu_governor();
-
-  setup_post();
-  setup_shm();
-  init_count_class16();
-
-  setup_dirs_fds();
-  read_testcases();
-  load_auto();
-
-  pivot_inputs();
-
-  if (extras_dir) load_extras(extras_dir);
-
-  if (!timeout_given) find_timeout();
-
-  detect_file_args(argv + optind + 1);
-
-  if (!out_file) setup_stdio_file();
-
-  check_binary(argv[optind]);
-
-  start_time = get_cur_time();
-
-  if (qemu_mode)
-    use_argv = get_qemu_argv(argv[0], argv + optind, argc - optind);
-  else
-    use_argv = argv + optind;
-
-  perform_dry_run(use_argv);
-
-  cull_queue();
-
-  show_init_stats();
-
-  seek_to = find_start_position();
-
-  write_stats_file(0, 0, 0);
-  save_auto();
-
-  if (stop_soon) goto stop_fuzzing;
-
-  /* Woop woop woop */
-
-  if (!not_on_tty) {
-    sleep(4);
-    start_time += 4000;
-    if (stop_soon) goto stop_fuzzing;
-  }
-
-  while (1) {
-
-    u8 skipped_fuzz;
-
-    cull_queue();
-
-    if (!queue_cur) {
-
-      queue_cycle++;
-      current_entry     = 0;
-      cur_skipped_paths = 0;
-      queue_cur         = queue;
-
-      while (seek_to) {
-        current_entry++;
-        seek_to--;
-        queue_cur = queue_cur->next;
-      }
-
-      show_stats();
-
-      if (not_on_tty) {
-        ACTF("Entering queue cycle %llu.", queue_cycle);
-        fflush(stdout);
-      }
-
-      /* If we had a full queue cycle with no new finds, try
-         recombination strategies next. */
-
-      if (queued_paths == prev_queued) {
-
-        if (use_splicing) cycles_wo_finds++; else use_splicing = 1;
-
-      } else cycles_wo_finds = 0;
-
-      prev_queued = queued_paths;
-
-      if (sync_id && queue_cycle == 1 && getenv("AFL_IMPORT_FIRST"))
-        sync_fuzzers(use_argv);
-
-    }
-
-    skipped_fuzz = fuzz_one(use_argv);
-
-    if (!stop_soon && sync_id && !skipped_fuzz) {
-      
-      if (!(sync_interval_cnt++ % SYNC_INTERVAL))
-        sync_fuzzers(use_argv);
-
-    }
-
-    if (!stop_soon && exit_1) stop_soon = 2;
-
-    if (stop_soon) break;
-
-    queue_cur = queue_cur->next;
-    current_entry++;
-
-  }
-
-  if (queue_cur) show_stats();
-
-  /* If we stopped programmatically, we kill the forkserver and the current runner. 
-     If we stopped manually, this is done by the signal handler. */
-  if (stop_soon == 2) {
-      if (child_pid > 0) kill(child_pid, SIGKILL);
-      if (forksrv_pid > 0) kill(forksrv_pid, SIGKILL);
-  }
-  /* Now that we've killed the forkserver, we wait for it to be able to get rusage stats. */
-  if (waitpid(forksrv_pid, NULL, 0) <= 0) {
-    WARNF("error waitpid\n");
-  }
-
-  write_bitmap();
-  write_stats_file(0, 0, 0);
-  save_auto();
-
-stop_fuzzing:
-
-  SAYF(CURSOR_SHOW cLRD "\n\n+++ Testing aborted %s +++\n" cRST,
-       stop_soon == 2 ? "programmatically" : "by user");
-
-  /* Running for more than 30 minutes but still doing first cycle? */
-
-  if (queue_cycle == 1 && get_cur_time() - start_time > 30 * 60 * 1000) {
-
-    SAYF("\n" cYEL "[!] " cRST
-           "Stopped during the first cycle, results may be incomplete.\n"
-           "    (For info on resuming, see %s/README.)\n", doc_path);
-
-  }
-
-  fclose(plot_file);
-  destroy_queue();
-  destroy_extras();
-  ck_free(target_path);
-  ck_free(sync_id);
-
-  alloc_report();
-
-  OKF("We're done here. Have a nice day!\n");
-
-  exit(0);
-
+  
+const char *json_str = 
+"{"
+"\"name\": \"openssl\", "
+"\"protocol\": \"TLS\", "
+"\"skip_deterministic\": \"True\", "
+"\"input\": \"/home/ubuntu/experiments/in-tls\", "
+"\"extra\": \"/home/ubuntu/experiments/tls.dict\", "
+"\"output_dir\": \"/home/ubuntu/experiments/out-openssl-aflnwe\", "
+"\"use_net\": \"tcp://127.0.0.1/4433\", "
+"\"server_wait\": \"10000\", "
+"\"terminate_child\": \"True\", "
+"\"socket_timeout\": \"100\", "
+"\"exec_tmout\": \"5000+\", "
+"\"mem_limit\": \"none\", "
+"\"target_cmd\": \"/home/ubuntu/experiments/openssl/apps/openssl s_server -key /home/ubuntu/experiments/openssl/key.pem -cert /home/ubuntu/experiments/openssl/cert.pem -4 -naccept 1 -no_anti_replay\""
+"}";
+
+
+
+
+__parse_args(json_str);
+__set_up();
+
+
+// 2. 分配100字节内存
+global_buf = (char *)malloc(100);
+if (global_buf == NULL) {
+    // 处理内存分配失败
+    global_buf_len = 0;
+    return;
 }
 
+// 3. 初始化为100个0
+memset(global_buf, 0, 100);
+global_buf_len = 100;
+
+printf("11111111111111\n");
+
+
+__pre_run_target(exec_tmout);
+printf("11111111111111\n");
+__run_target();
+__post_run_target(exec_tmout);
+printf("11111111111111\n");
+
+__clear();
+}
 #endif /* !AFL_LIB */
