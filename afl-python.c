@@ -8335,11 +8335,11 @@ void __get_test_case(const char *buf, size_t buf_len) {
     // 4. 复制数据（memmove更安全）
     memmove(global_buf, buf, buf_len);  // 处理内存重叠情况
 
-    // 5. 可选：调试日志
-    if (verbose) {
-        // fprintf(stderr, "[MEM] Updated buffer %p -> %p (%zu bytes)\n",
-        //         (void*)global_buf, (void*)new_buf, buf_len);
-    }
+    // // 5. 可选：调试日志
+    // if (verbose) {
+    //     // fprintf(stderr, "[MEM] Updated buffer %p -> %p (%zu bytes)\n",
+    //     //         (void*)global_buf, (void*)new_buf, buf_len);
+    // }
 }
 
 char* __get_response_buf(){
@@ -8549,6 +8549,25 @@ int __pre_run_target(u32 timeout){
 
 
 
+void __get_test_case_and_run_target(const char *buf, size_t buf_len){
+   // 1. 输入验证
+    // if (buf == NULL) FATAL("Input buffer is NULL");
+    // if (buf_len == 0) FATAL("Buffer length cannot be zero");
+
+
+    int n;
+    struct timeval timeout;
+    timeout.tv_sec = 0;
+    timeout.tv_usec = socket_timeout_usecs;
+
+    n = net_send(global_sockfd, timeout, buf, buf_len);
+
+    net_recv(global_sockfd, timeout, poll_wait_msecs, &global_response_buf, &global_response_buf_len);
+
+}
+
+
+
 void __run_target(){
 
   int n;
@@ -8685,6 +8704,16 @@ u32 __trace_hash32(){
 }
 
 
+
+
+// 添加此函数定义
+long long get_current_ms() {
+    struct timeval tv;
+    gettimeofday(&tv, NULL);
+    return tv.tv_sec * 1000LL + tv.tv_usec / 1000;
+}
+
+
 #ifndef AFL_LIB
 
 /* Main entry point */
@@ -8737,14 +8766,36 @@ if (global_buf == NULL) {
 memset(global_buf, 0, 100);
 global_buf_len = 100;
 
-printf("11111111111111\n");
 
 
+long long start = get_current_ms();
 __pre_run_target(exec_tmout);
-printf("11111111111111\n");
-__run_target();
+long long end = get_current_ms();
+printf("__pre_run_target took %lld ms\n", end - start);
+
+
+start = get_current_ms();
+
+int i = 0;
+
+for(;i<100;i++){
+
+  __get_test_case_and_run_target(global_buf,global_buf_len);
+
+}
+
+end = get_current_ms();
+printf("__pre_run_target took %lld ms\n", end - start);
+
+
+start = get_current_ms();
+
 __post_run_target(exec_tmout);
-printf("11111111111111\n");
+
+end = get_current_ms();
+
+printf("__pre_run_target took %lld ms\n", end - start);
+
 
 __clear();
 }

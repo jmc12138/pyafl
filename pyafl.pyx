@@ -4,6 +4,8 @@
 #include "debug.h"
 #include "types.h"
 
+
+cimport cython
 from cpython.bytes cimport PyBytes_AsString, PyBytes_GET_SIZE
 
 # 引入 AFL 的 C 逻辑
@@ -81,16 +83,19 @@ def get_response_buff():
     return buf[:len_buf]  
 
 
-cdef extern int __pre_run_target(unsigned int timeout)
+cdef extern int __pre_run_target(unsigned int timeout) nogil
 cdef extern void __run_target()
 cdef extern int __post_run_target(unsigned int timeout)
 
 cdef extern void __get_test_case(const char *buf, size_t buf_len) 
+cdef extern void __get_test_case_and_run_target(const char *buf, size_t buf_len) nogil
 cdef extern unsigned int __get_exec_tmout()
 
 cdef extern unsigned int __trace_bytes_count()
 cdef extern unsigned int __var_bytes_count()
 cdef extern unsigned int __trace_hash32()
+
+
 
 def get_exec_tmout():
     return __get_exec_tmout()
@@ -107,20 +112,28 @@ def trace_bytes_count():
 def var_bytes_count():
     return __var_bytes_count()
 
+
+
 def pre_run_target(timeout):
-    
-    return __pre_run_target(timeout)
+    cdef unsigned int c_timeout = timeout
+    with nogil:
+        res = __pre_run_target(c_timeout)
+    return res
+
 
 
 
 
 def run_target(bytes buf):
-    cdef char* c_str = PyBytes_AsString(buf)
-    cdef int length = PyBytes_GET_SIZE(buf)
+    cdef:
+        const unsigned char[:] data_view = buf  # 安全只读访问 bytes
+        size_t length = data_view.shape[0]
 
-    __get_test_case(c_str,length)
+    with nogil:
+        __get_test_case_and_run_target(<const char*>&data_view[0], length)
+    
 
-    return __run_target()
+
 
 
 

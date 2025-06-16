@@ -14,10 +14,10 @@ import humanize
 from datetime import datetime
 from utils import PcapGenerator
 from enum import Enum, auto
-
+import time
 import utils
 import signal
-
+from line_profiler import LineProfiler,profile
 
 class FaultCode(Enum):
     """Execution status fault codes"""
@@ -237,7 +237,7 @@ class Fuzzer():
         console.print(info)
         console.print(msg_table)
 
-
+    # @profile 
     def run_target(self,test_case):
         messages = test_case.messages
         timeout = self.exec_tmout  
@@ -246,18 +246,40 @@ class Fuzzer():
         pyafl.pre_run_target(timeout)
 
         response.append(pyafl.get_response_buff())
+        
 
         for msg in messages:
 
             pyafl.run_target(msg)
             response.append(pyafl.get_response_buff())
 
-
+        
+        # pyafl.run_target(messages[0])
+        # pyafl.run_target(messages[1])
+        # pyafl.run_target(messages[2])
+        # pyafl.run_target(messages[3])
+        # pyafl.run_target(messages[4])
 
         pyafl.post_run_target(timeout)
 
         # response.append(pyafl.get_response_buff())
         return messages,response
+
+    def profile_run_target(self,test_case):
+
+        profiler = LineProfiler()
+        profiler.add_function(self.run_target)  # 添加要分析的函数
+
+        # 运行分析
+        profiler.enable_by_count()
+        result = self.run_target(test_case)
+        profiler.disable_by_count()
+
+        # 打印结果
+        profiler.print_stats()
+
+
+
 
     def debug(self):
         pyafl.debug()
@@ -321,12 +343,35 @@ class Fuzzer():
         print("\n[!] 检测到中断信号，正在停止...")
         self.running = False
 
+
     def fuzz(self):
         print("start fuzzing, WAAAAAAAAAGH!!!")
+        start_time = time.time()  # 记录fuzzing开始时间
+        last_time = start_time
+        last_exec = 0
+        
         while self.running:
+            # 运行测试用例并计数
             self.run_target(self.init_test_cases[0])
             self.total_exec += 1
             
+            # 计算并显示每秒执行速率
+            current_time = time.time()
+            elapsed = current_time - last_time
+            
+            # 每秒更新一次统计数据
+            if elapsed >= 1.0:
+                # 计算当前时段的执行速度
+                execs_in_period = self.total_exec - last_exec
+                execs_per_second = execs_in_period / elapsed
+                
+                # 打印速率信息
+                print(f"[PERF] Current: {execs_per_second:.1f} execs/sec | "
+                    f"Total: {self.total_exec} execs")
+                
+                # 重置计数器和时间戳
+                last_time = current_time
+                last_exec = self.total_exec
 
 
 

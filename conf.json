@@ -8,7 +8,7 @@
     "use_net": "tcp://127.0.0.1/4433",
     "server_wait": "10000",
     "terminate_child": "True",
-    "poll_wait_msecs": "100",
+    "poll_wait_msecs": "30",
     "exec_tmout": "5000+",
     "mem_limit": "none",
     "target_cmd": "/home/ubuntu/experiments/openssl/apps/openssl s_server -key /home/ubuntu/experiments/openssl/key.pem -cert /home/ubuntu/experiments/openssl/cert.pem -4 -naccept 1 -no_anti_replay"

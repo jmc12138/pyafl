@@ -22,7 +22,7 @@ extra_compile_args = [
     "-funroll-loops",
     "-fPIC",
     "-Wall",
-    "-g",
+    # "-g",
     "-Wno-pointer-sign",
     "-Wno-unused-result",
 ]
@@ -37,7 +37,7 @@ extensions = [
     Extension(
         "pyafl",
         sources=["pyafl.pyx"],  # 只包含 pyx，C 文件通过 #include 引入
-        libraries=["cjson", "m"],  # 使用系统库 -lcjson -lm
+        libraries=["cjson"],  # 使用系统库 -lcjson -lm
         include_dirs=[],
         define_macros=define_macros,
         extra_compile_args=extra_compile_args,
