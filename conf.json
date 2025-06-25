@@ -4,13 +4,20 @@
     "skip_deterministic": "True",
     "input_dir": "/home/ubuntu/experiments/in-tls",
     "extra": "/home/ubuntu/experiments/tls.dict",
-    "output_dir": "/home/ubuntu/experiments/out-openssl-aflnwe",
+    "output_dir": "/home/ubuntu/experiments/out-openssl-pyafl",
     "use_net": "tcp://127.0.0.1/4433",
     "server_wait": "10000",
     "terminate_child": "True",
     "poll_wait_msecs": "30",
     "exec_tmout": "5000+",
     "mem_limit": "none",
-    "target_cmd": "/home/ubuntu/experiments/openssl/apps/openssl s_server -key /home/ubuntu/experiments/openssl/key.pem -cert /home/ubuntu/experiments/openssl/cert.pem -4 -naccept 1 -no_anti_replay"
+    "target_cmd": "/home/ubuntu/experiments/openssl/apps/openssl s_server -key /home/ubuntu/experiments/openssl/key.pem -cert /home/ubuntu/experiments/openssl/cert.pem -4 -naccept 1 -no_anti_replay",
+    "dumb_mode": "False",
 
+    "coverage":{
+        "step" : 5,
+        "target_cmd" : "/home/ubuntu/experiments/openssl-gcov/apps/openssl s_server -key /home/ubuntu/experiments/openssl/key.pem -cert /home/ubuntu/experiments/openssl/cert.pem -4 -naccept 1 -no_anti_replay",
+        "csv_file" : "coverage.csv",
+        "work_dir": "/home/ubuntu/experiments/openssl-gcov"
+    }
 }

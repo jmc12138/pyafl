@@ -95,7 +95,29 @@ cdef extern unsigned int __trace_bytes_count()
 cdef extern unsigned int __var_bytes_count()
 cdef extern unsigned int __trace_hash32()
 
+cdef extern void __simplify_trace_bits()
 
+cdef extern int __tmout_has_new_bit()
+cdef extern int __crash_has_new_bit()
+cdef extern int __has_new_bit()
+
+cdef extern unsigned int __trace_min_hash32()
+
+
+def trace_min_hash32():
+    return __trace_min_hash32()
+
+def tmout_has_new_bit():
+    return __tmout_has_new_bit()
+
+def crash_has_new_bit():
+    return __tmout_has_new_bit()
+
+def has_new_bit():
+    return __tmout_has_new_bit()
+
+def simplify_trace_bits():
+    __simplify_trace_bits()
 
 def get_exec_tmout():
     return __get_exec_tmout()
@@ -117,8 +139,7 @@ def var_bytes_count():
 def pre_run_target(timeout):
     cdef unsigned int c_timeout = timeout
     with nogil:
-        res = __pre_run_target(c_timeout)
-    return res
+        __pre_run_target(c_timeout)
 
 
 

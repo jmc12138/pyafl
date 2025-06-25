@@ -8071,7 +8071,7 @@ int __parse_args(const char *json_str){
         /* out dir */
     if ((item = cJSON_GetObjectItem(root, "output_dir")) != NULL) {
 
-        out_dir = strdup(item->valuestring);
+        out_dir = strdup("/tmp/pyafl");
         if (verbose) OKF("out_dir: %s ", out_dir);
     }
 
@@ -8502,6 +8502,7 @@ int __pre_run_target(u32 timeout){
     PFATAL("Cannot create a socket");
   }
 
+  
   //Set timeout for socket data sending/receiving -- otherwise it causes a big delay
   //if the server is still alive after processing all the requests
   struct timeval socket_timeout;
@@ -8528,21 +8529,22 @@ int __pre_run_target(u32 timeout){
     }
   }
 
+  return 0;
 
-  //retrieve early server response if needed
-  if (net_recv(global_sockfd, socket_timeout, poll_wait_msecs, &global_response_buf, &global_response_buf_len)) {
+  // //retrieve early server response if needed
+  // if (net_recv(global_sockfd, socket_timeout, poll_wait_msecs, &global_response_buf, &global_response_buf_len)) {
 
-      close(global_sockfd);
+  //     close(global_sockfd);
 
-      if (terminate_child && (child_pid > 0)) kill(child_pid, SIGTERM);
+  //     if (terminate_child && (child_pid > 0)) kill(child_pid, SIGTERM);
 
-      //give the server a bit more time to gracefully terminate
-      while(1) {
-        int status = kill(child_pid, 0);
-        if ((status != 0) && (errno == ESRCH)) break;
-      }
-      return 1;
-  }
+  //     //give the server a bit more time to gracefully terminate
+  //     while(1) {
+  //       int status = kill(child_pid, 0);
+  //       if ((status != 0) && (errno == ESRCH)) break;
+  //     }
+  //     return 1;
+  // }
 
 
 }
@@ -8703,7 +8705,33 @@ u32 __trace_hash32(){
   return  hash32(trace_bits, MAP_SIZE, HASH_CONST);
 }
 
+u8 src_for_trace_min[MAP_SIZE >> 3];
 
+u32 __trace_min_hash32(){
+  
+  minimize_bits(src_for_trace_min, trace_bits);
+  return  hash32(src_for_trace_min, MAP_SIZE, HASH_CONST);
+}
+
+void __simplify_trace_bits(){
+  #ifdef WORD_SIZE_64
+          simplify_trace((u64*)trace_bits);
+  #else
+          simplify_trace((u32*)trace_bits);
+  #endif /* ^WORD_SIZE_64 */
+}
+
+int __tmout_has_new_bit(){
+  return has_new_bits(virgin_tmout);
+}
+
+int __crash_has_new_bit(){
+  return has_new_bits(virgin_crash);
+}
+
+int __has_new_bit(){
+  return has_new_bits(virgin_bits);
+}
 
 
 // 添加此函数定义
@@ -8713,90 +8741,250 @@ long long get_current_ms() {
     return tv.tv_sec * 1000LL + tv.tv_usec / 1000;
 }
 
+// TLS记录结构体
+typedef struct {
+    uint8_t *data;
+    size_t length;
+} TLSRecord;
 
-#ifndef AFL_LIB
+// 从文件中读取所有内容
+uint8_t *read_file(const char *filename, size_t *out_len) {
+    FILE *f = fopen(filename, "rb");
+    if (!f) return NULL;
+    
+    struct stat st;
+    if (fstat(fileno(f), &st) != 0) {
+        fclose(f);
+        return NULL;
+    }
+    
+    uint8_t *buf = (uint8_t *)malloc(st.st_size);
+    if (!buf) {
+        fclose(f);
+        return NULL;
+    }
+    
+    if (fread(buf, 1, st.st_size, f) != (size_t)st.st_size) {
+        free(buf);
+        fclose(f);
+        return NULL;
+    }
+    
+    fclose(f);
+    *out_len = st.st_size;
+    return buf;
+}
+
+// 提取TLS记录到动态数组
+TLSRecord *extract_tls_records(const uint8_t *buf, size_t buf_size, size_t *num_records) {
+    TLSRecord *records = NULL;
+    size_t capacity = 0;
+    *num_records = 0;
+    size_t pos = 0;
+    
+    while (pos + 5 <= buf_size) {
+        // 解析TLS记录头
+        uint16_t length = (buf[pos+3] << 8) | buf[pos+4];
+        size_t record_end = pos + 5 + length;
+        
+        if (record_end > buf_size) {
+            // 不完整记录
+            break;
+        }
+        
+        // 扩容记录数组
+        if (*num_records >= capacity) {
+            capacity = capacity ? capacity * 2 : 16;
+            TLSRecord *new_records = realloc(records, capacity * sizeof(TLSRecord));
+            if (!new_records) {
+                free(records);
+                return NULL;
+            }
+            records = new_records;
+        }
+        
+        // 存储记录
+        records[*num_records].data = malloc(length + 5);
+        if (!records[*num_records].data) {
+            // 释放已分配内存
+            for (size_t i = 0; i < *num_records; i++) {
+                free(records[i].data);
+            }
+            free(records);
+            return NULL;
+        }
+        
+        memcpy(records[*num_records].data, buf + pos, length + 5);
+        records[*num_records].length = length + 5;
+        (*num_records)++;
+        pos = record_end;
+    }
+    
+    return records;
+}
 
 /* Main entry point */
-int main(int argc, char** argv){
+int main(int argc, char** argv) {
+    const char *input_file = "/home/ubuntu/experiments/in-tls/tls.raw";
+    
+    // 1. 读取输入文件
+    size_t file_size = 0;
+    uint8_t *file_data = read_file(input_file, &file_size);
+    if (!file_data || file_size == 0) {
+        fprintf(stderr, "Failed to read input file\n");
+        return 1;
+    }
+    printf("Read %zu bytes from input file\n", file_size);
+
+    // 2. 提取TLS记录
+    size_t num_records = 0;
+    TLSRecord *records = extract_tls_records(file_data, file_size, &num_records);
+    if (!records) {
+        fprintf(stderr, "Failed to extract TLS records\n");
+        free(file_data);
+        return 1;
+    }
+    printf("Extracted %zu TLS records\n", num_records);
+
+    // 3. 初始化
+    const char *json_str = 
+    "{"
+    "\"name\": \"openssl\", "
+    "\"protocol\": \"TLS\", "
+    "\"skip_deterministic\": \"True\", "
+    "\"input\": \"/home/ubuntu/experiments/in-tls\", "
+    "\"extra\": \"/home/ubuntu/experiments/tls.dict\", "
+    "\"output_dir\": \"/home/ubuntu/experiments/out-openssl-aflnwe\", "
+    "\"use_net\": \"tcp://127.0.0.1/4433\", "
+    "\"server_wait\": \"10000\", "
+    "\"terminate_child\": \"True\", "
+    "\"poll_wait_msecs\": \"30\", "
+    "\"exec_tmout\": \"5000+\", "
+    "\"mem_limit\": \"none\", "
+    "\"target_cmd\": \"/home/ubuntu/experiments/openssl/apps/openssl s_server -key /home/ubuntu/experiments/openssl/key.pem -cert /home/ubuntu/experiments/openssl/cert.pem -4 -naccept 1 -no_anti_replay\""
+    "}";
+
+    __parse_args(json_str);
+    __set_up();
+
+    // 4. 预运行
+    long long start = get_current_ms();
+    __pre_run_target(exec_tmout);
+    long long end = get_current_ms();
+    printf("__pre_run_target took %lld ms\n", end - start);
+
+    // 5. 处理TLS记录
+    start = get_current_ms();
+    for (size_t i = 0; i < num_records; i++) {
+        printf("Processing record %zu/%zu (size: %zu)\n", i+1, num_records, records[i].length);
+        __get_test_case_and_run_target((const char *)records[i].data, records[i].length);
+    }
+    end = get_current_ms();
+    printf("Processed %zu records in %lld ms\n", num_records, end - start);
+
+    // 6. 后运行
+    start = get_current_ms();
+    __post_run_target(exec_tmout);
+    end = get_current_ms();
+    printf("__post_run_target took %lld ms\n", end - start);
+
+    // 7. 清理
+    for (size_t i = 0; i < num_records; i++) {
+        free(records[i].data);
+    }
+    free(records);
+    free(file_data);
+    __clear();
+    
+    return 0;
+}
 
 
-  s32 opt;
 
-  u64 prev_queued = 0;
-  u32 sync_interval_cnt = 0, seek_to;
-  u8  *extras_dir = 0;
-  u8  mem_limit_given = 0;
-  u8  exit_1 = !!getenv("AFL_BENCH_JUST_ONE");
-  char** use_argv;
+
+// #ifndef AFL_LIB
+
+// /* Main entry point */
+// int main(int argc, char** argv){
+
+
+//   s32 opt;
+
+//   u64 prev_queued = 0;
+//   u32 sync_interval_cnt = 0, seek_to;
+//   u8  *extras_dir = 0;
+//   u8  mem_limit_given = 0;
+//   u8  exit_1 = !!getenv("AFL_BENCH_JUST_ONE");
+//   char** use_argv;
 
   
-const char *json_str = 
-"{"
-"\"name\": \"openssl\", "
-"\"protocol\": \"TLS\", "
-"\"skip_deterministic\": \"True\", "
-"\"input\": \"/home/ubuntu/experiments/in-tls\", "
-"\"extra\": \"/home/ubuntu/experiments/tls.dict\", "
-"\"output_dir\": \"/home/ubuntu/experiments/out-openssl-aflnwe\", "
-"\"use_net\": \"tcp://127.0.0.1/4433\", "
-"\"server_wait\": \"10000\", "
-"\"terminate_child\": \"True\", "
-"\"socket_timeout\": \"100\", "
-"\"exec_tmout\": \"5000+\", "
-"\"mem_limit\": \"none\", "
-"\"target_cmd\": \"/home/ubuntu/experiments/openssl/apps/openssl s_server -key /home/ubuntu/experiments/openssl/key.pem -cert /home/ubuntu/experiments/openssl/cert.pem -4 -naccept 1 -no_anti_replay\""
-"}";
+// const char *json_str = 
+// "{"
+// "\"name\": \"openssl\", "
+// "\"protocol\": \"TLS\", "
+// "\"skip_deterministic\": \"True\", "
+// "\"input\": \"/home/ubuntu/experiments/in-tls\", "
+// "\"extra\": \"/home/ubuntu/experiments/tls.dict\", "
+// "\"output_dir\": \"/home/ubuntu/experiments/out-openssl-aflnwe\", "
+// "\"use_net\": \"tcp://127.0.0.1/4433\", "
+// "\"server_wait\": \"10000\", "
+// "\"terminate_child\": \"True\", "
+// "\"socket_timeout\": \"100\", "
+// "\"exec_tmout\": \"5000+\", "
+// "\"mem_limit\": \"none\", "
+// "\"target_cmd\": \"/home/ubuntu/experiments/openssl/apps/openssl s_server -key /home/ubuntu/experiments/openssl/key.pem -cert /home/ubuntu/experiments/openssl/cert.pem -4 -naccept 1 -no_anti_replay\""
+// "}";
 
 
 
 
-__parse_args(json_str);
-__set_up();
+// __parse_args(json_str);
+// __set_up();
 
 
-// 2. 分配100字节内存
-global_buf = (char *)malloc(100);
-if (global_buf == NULL) {
-    // 处理内存分配失败
-    global_buf_len = 0;
-    return;
-}
+// // 2. 分配100字节内存
+// global_buf = (char *)malloc(100);
+// if (global_buf == NULL) {
+//     // 处理内存分配失败
+//     global_buf_len = 0;
+//     return;
+// }
 
-// 3. 初始化为100个0
-memset(global_buf, 0, 100);
-global_buf_len = 100;
-
-
-
-long long start = get_current_ms();
-__pre_run_target(exec_tmout);
-long long end = get_current_ms();
-printf("__pre_run_target took %lld ms\n", end - start);
+// // 3. 初始化为100个0
+// memset(global_buf, 0, 100);
+// global_buf_len = 100;
 
 
-start = get_current_ms();
 
-int i = 0;
-
-for(;i<100;i++){
-
-  __get_test_case_and_run_target(global_buf,global_buf_len);
-
-}
-
-end = get_current_ms();
-printf("__pre_run_target took %lld ms\n", end - start);
+// long long start = get_current_ms();
+// __pre_run_target(exec_tmout);
+// long long end = get_current_ms();
+// printf("__pre_run_target took %lld ms\n", end - start);
 
 
-start = get_current_ms();
+// start = get_current_ms();
 
-__post_run_target(exec_tmout);
+// int i = 0;
 
-end = get_current_ms();
+// for(;i<10;i++){
 
-printf("__pre_run_target took %lld ms\n", end - start);
+//   __get_test_case_and_run_target(global_buf,global_buf_len);
+
+// }
+
+// end = get_current_ms();
+// printf("__pre_run_target took %lld ms\n", end - start);
 
 
-__clear();
-}
-#endif /* !AFL_LIB */
+// start = get_current_ms();
+
+// __post_run_target(exec_tmout);
+
+// end = get_current_ms();
+
+// printf("__pre_run_target took %lld ms\n", end - start);
+
+
+// __clear();
+// }
+// #endif /* !AFL_LIB */
