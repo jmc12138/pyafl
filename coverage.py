@@ -7,6 +7,10 @@ from pathlib import Path
 import pandas as pd
 import json
 from tqdm import tqdm
+import logging
+
+# 配置日志输出
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 class CoverageCollector:
     def __init__(self, folder, port, step, covfile, target_cmd: str, work_dir):
@@ -15,11 +19,11 @@ class CoverageCollector:
         self.step = step
         self.covfile = Path(covfile)
         self.coverage_data = []
+        self.skipped_log = []  # 记录跳过的测试用例
         # Determine test directory and replayer
         self.testdir = "queue" 
         self.replayer = "aflnet-replay" 
         self.target_cmd = target_cmd.split(' ')
-        #需要改变工作目录，因为gcovr需要找到编译时产生的文件来计算
         self.work_dir = work_dir
         os.chdir(work_dir)
 
@@ -55,36 +59,37 @@ class CoverageCollector:
         return coverage
 
     def _run_test_case(self, test_file):
+        """运行单个测试用例，捕获超时和其他异常"""
         replayer_cmd = [self.replayer, str(test_file), "TLS", str(self.port), "100"]
         proc = subprocess.Popen(replayer_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        
+
         try:
-            subprocess.run(
+            result = subprocess.run(
                 self.target_cmd,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
-                timeout=3
+                timeout=10
             )
+            if result.returncode != 0:
+                logging.warning(f"Test case {test_file} exited with code {result.returncode}.")
+        except subprocess.TimeoutExpired:
+            logging.warning(f"Test case {test_file} timed out. Skipping.")
+            self.skipped_log.append(str(test_file))
+        except Exception as e:
+            logging.error(f"Unexpected error with test case {test_file}: {e}")
+            self.skipped_log.append(str(test_file))
         finally:
-            proc.wait()  # 确保replayer进程完成
+            # 确保 replayer 进程完成
+            proc.wait()
 
     def process_files(self):
         """Process all test files and collect coverage"""
         test_dir = self.folder / self.testdir
         
-        # Get total number of test files for progress bar
-        raw_files = list(test_dir.glob("*.raw"))
         id_files = list(test_dir.glob("id*"))
-        total_files = len(raw_files) + len(id_files)
+        total_files = len(id_files)
         
-        # Initialize progress bar
         with tqdm(total=total_files, desc="Processing test cases", unit="file") as pbar:
-            # Process .raw files first
-            for raw_file in raw_files:
-                self._process_single_test(raw_file, record=True)
-                pbar.update(1)
-            
-            # Process other test files
             count = 0
             for test_file in id_files:
                 count += 1
@@ -94,7 +99,7 @@ class CoverageCollector:
                 )
                 pbar.update(1)
             
-            if not count%self.step:
+            if not count % self.step:
                 self.save_coverage()
 
             # Record last test case if step > 1
@@ -131,8 +136,20 @@ class CoverageCollector:
         try:
             df = pd.DataFrame(self.coverage_data)
             df.to_csv(self.covfile, mode='a', header=False, index=False)
+            self.coverage_data.clear()  # 清空已保存数据
         except Exception as e:
             print(f"Error saving coverage data: {str(e)}", file=sys.stderr)
+
+    def save_skipped_log(self, log_path="skipped_tests.log"):
+        """将跳过的测试用例写入日志文件"""
+        if self.skipped_log:
+            with open(log_path, 'w') as f:
+                for test in self.skipped_log:
+                    f.write(f"{test}\n")
+            logging.info(f"Skipped {len(self.skipped_log)} test cases. See '{log_path}' for details.")
+        else:
+            logging.info("No skipped test cases.")
+
 
 def main():
     conf_path = 'conf.json'
@@ -152,7 +169,7 @@ def main():
         step=step,
         covfile=covfile_path,
         target_cmd=target_cmd,
-        work_dir = work_dir
+        work_dir=work_dir
     )
 
     print("Initializing coverage collection...")
@@ -163,6 +180,9 @@ def main():
     
     print("Saving coverage data...")
     collector.save_coverage()
+
+    print("Saving skipped tests log...")
+    collector.save_skipped_log()
     
     print("Coverage collection completed!")
 

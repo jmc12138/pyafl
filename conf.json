@@ -16,8 +16,9 @@
 
     "coverage":{
         "step" : 5,
-        "target_cmd" : "/home/ubuntu/experiments/openssl-gcov/apps/openssl s_server -key /home/ubuntu/experiments/openssl/key.pem -cert /home/ubuntu/experiments/openssl/cert.pem -4 -naccept 1 -no_anti_replay",
+        "target_cmd" : "/home/ubuntu/experiments/openssl-gcov/apps/openssl s_server -key /home/ubuntu/experiments/openssl/key.pem -cert /home/ubuntu/experiments/openssl/cert.pem -4 -naccept 1 -no_anti_replay -port @@",
         "csv_file" : "coverage.csv",
-        "work_dir": "/home/ubuntu/experiments/openssl-gcov"
+        "work_dir": "/home/ubuntu/experiments/openssl-gcov",
+        "parrallel": "True"
     }
 }
