@@ -145,7 +145,7 @@ class Mutator:
         msg = messages[msg_idx]
         # 根据 AFL 的概率分布选择变异方法
         choice = random.randint(0, 15 + 2 + (4 if self.region_level_mutation else 0))
-        # choice = 11
+        choice = 0
         # print(msg)
         if choice in mutation_funcs:
             if choice <= 16:
@@ -181,13 +181,6 @@ class Mutator:
 
 
 
-    @jit(nopython=True)
-    def flip_single_bit_numba(msg):
-        """使用Numba加速的版本"""
-        bit_pos = random.randint(0, len(msg) * 8 - 1)
-        byte_pos = bit_pos // 8
-        bit_in_byte = bit_pos % 8
-        msg[byte_pos] ^= (1 << (7 - bit_in_byte))
 
     def interesting_8(self, msg: bytearray) -> None:
         """ 用特殊值替换随机字节 """
