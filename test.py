@@ -14,6 +14,7 @@ test_cases = fuzzer.get_init_test_cases()
 
 # pyafl.pre_run_target(100)
 messages, responses = fuzzer.run_target(test_cases[0])
+fuzzer.fuzz_one_profile()
 # fuzzer.profile_run_target(test_cases[0])
 
 
@@ -27,8 +28,8 @@ messages, responses = fuzzer.run_target(test_cases[0])
 # fuzzer.save_pcap(messages,responses)
 
 
-fuzzer.perform_dry_run()
+# fuzzer.perform_dry_run()
 
-fuzzer.fuzz()
+# fuzzer.fuzz()
 
 fuzzer.clear()

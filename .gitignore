@@ -5,6 +5,10 @@ pyafl.c
 session.log
 session.pcap
 __pycache__
+
+*.log
+*.csv
+
 # Binaries produced by "make".
 afl-analyze
 afl-as

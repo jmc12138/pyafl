@@ -2,29 +2,44 @@
 import os
 import sys
 import time
+import signal
+import socket
 import subprocess
 from pathlib import Path
 import pandas as pd
 import json
 from tqdm import tqdm
 import logging
+import threading
+import multiprocessing
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # 配置日志输出
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s [%(threadName)s] %(levelname)s: %(message)s',
+    handlers=[
+        logging.FileHandler('coverage.log'),
+        logging.StreamHandler()
+    ]
+)
 
 class CoverageCollector:
-    def __init__(self, folder, port, step, covfile, target_cmd: str, work_dir):
+    def __init__(self, folder, port, step, covfile, target_cmd: str, work_dir, parallel=False):
         self.folder = Path(folder)
-        self.port = port
+        self.base_port = port
         self.step = step
         self.covfile = Path(covfile)
         self.coverage_data = []
-        self.skipped_log = []  # 记录跳过的测试用例
-        # Determine test directory and replayer
-        self.testdir = "queue" 
-        self.replayer = "aflnet-replay" 
-        self.target_cmd = target_cmd.split(' ')
+        self.skipped_log = []
+        self.testdir = "queue"
+        self.replayer = "aflnet-replay"
+        self.target_cmd = target_cmd
         self.work_dir = work_dir
+        self.parallel = parallel
+        self.lock = threading.Lock()
+        self.port_lock = threading.Lock()
+        self.used_ports = set()
         os.chdir(work_dir)
 
     def initialize(self):
@@ -33,13 +48,11 @@ class CoverageCollector:
         self.covfile.touch()
         self._run_gcovr(clear=True)
         
-        # Write CSV header
         with self.covfile.open('a') as f:
             f.write("Time,l_per,l_abs,b_per,b_abs\n")
 
     def _run_gcovr(self, clear=False):
-        """Run gcovr and return coverage data"""
-        cmd = ["gcovr", "-r", ".", "-s"]
+        cmd = ["gcovr", "-r", ".", "-s", "--gcov-ignore-parse-errors"]
         if clear:
             cmd.append("-d")
             subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -58,67 +71,164 @@ class CoverageCollector:
                 coverage[f"{metric}_abs"] = parts[2].lstrip('(').rstrip(')')
         return coverage
 
-    def _run_test_case(self, test_file):
-        """运行单个测试用例，捕获超时和其他异常"""
-        replayer_cmd = [self.replayer, str(test_file), "TLS", str(self.port), "100"]
-        proc = subprocess.Popen(replayer_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    def _get_available_port(self):
+        """动态获取可用端口"""
+        with self.port_lock:
+            for port in range(self.base_port, self.base_port + 100):
+                if port not in self.used_ports:
+                    if self._port_available(port):
+                        self.used_ports.add(port)
+                        return port
+            raise RuntimeError("No available ports")
 
+    def _port_available(self, port):
+        """检查端口是否真正可用"""
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            return s.connect_ex(('localhost', port)) != 0
+
+    def _release_port(self, port):
+        """释放端口"""
+        with self.port_lock:
+            if port in self.used_ports:
+                self.used_ports.remove(port)
+
+
+
+
+    def _run_test_case(self, test_file):
+        port = None
+        ssl_server = None
+        proc = None
+        
         try:
-            result = subprocess.run(
-                self.target_cmd,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                timeout=10
+            # 1. 获取可用端口
+            port = self._get_available_port()
+            cmd = self.target_cmd.replace('@@', str(port))
+            cmd_list = cmd.split(' ')
+            
+            # 2. 启动OpenSSL服务器（带调试参数）
+            ssl_server = subprocess.Popen(
+                cmd_list,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True
             )
-            if result.returncode != 0:
-                logging.warning(f"Test case {test_file} exited with code {result.returncode}.")
+                      
+            # 4. 运行aflnet-replay（带详细日志）
+            replayer_cmd = [
+                self.replayer,
+                str(test_file),
+                "TLS",
+                str(port),
+                "100"
+            ]
+            
+            proc = subprocess.Popen(
+                replayer_cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True
+            )           
+
+                
         except subprocess.TimeoutExpired:
-            logging.warning(f"Test case {test_file} timed out. Skipping.")
-            self.skipped_log.append(str(test_file))
+            error_msg = f"Timeout while processing {test_file} (port:{port})"
+            logging.error(error_msg)
+            raise RuntimeError(error_msg)
+            
         except Exception as e:
-            logging.error(f"Unexpected error with test case {test_file}: {e}")
-            self.skipped_log.append(str(test_file))
+            logging.error(f"Unexpected error processing {test_file}: {str(e)}", exc_info=True)
+            raise
         finally:
-            # 确保 replayer 进程完成
-            proc.wait()
+            # 7. 资源清理（跨平台兼容）
+            try:
+                if proc and proc.poll() is None:
+                    proc.terminate()
+                    try:
+                        proc.wait(timeout=1)
+                    except:
+                        if sys.platform != "win32":
+                            os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+                
+                if ssl_server and ssl_server.poll() is None:
+                    ssl_server.terminate()
+                    try:
+                        ssl_server.wait(timeout=1)
+                    except:
+                        if sys.platform != "win32":
+                            os.killpg(os.getpgid(ssl_server.pid), signal.SIGKILL)
+                            
+                if port:
+                    self._release_port(port)
+                    
+            except Exception as cleanup_err:
+                logging.warning(f"Cleanup error: {str(cleanup_err)}")
+
+
+
+    def _wait_for_port(self, port, timeout=5):
+        """等待端口变为可连接状态"""
+        end_time = time.time() + timeout
+        while time.time() < end_time:
+            try:
+                with socket.create_connection(('localhost', port), timeout=1):
+                    return True
+            except (ConnectionRefusedError, socket.timeout):
+                time.sleep(0.1)
+        return False
 
     def process_files(self):
-        """Process all test files and collect coverage"""
         test_dir = self.folder / self.testdir
-        
-        id_files = list(test_dir.glob("id*"))
+        id_files = sorted(test_dir.glob("id*"))
         total_files = len(id_files)
         
-        with tqdm(total=total_files, desc="Processing test cases", unit="file") as pbar:
-            count = 0
-            for test_file in id_files:
-                count += 1
-                self._process_single_test(
-                    test_file,
-                    record=(count % self.step == 0)
-                )
-                pbar.update(1)
+        if self.parallel and '@@' in self.target_cmd:
+            # 并行处理（动态端口分配）
+            max_workers = min(8, multiprocessing.cpu_count())  # 限制最大并发数
+            completed = 0
             
-            if not count % self.step:
-                self.save_coverage()
-
-            # Record last test case if step > 1
-            if self.step > 1 and count % self.step != 0:
-                self._record_coverage(test_file)
-
-    def _process_single_test(self, test_file, record):
-        """Process a single test file"""
-        self._run_test_case(test_file)
+            with ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="Worker") as executor:
+                futures = {executor.submit(self._process_single_test, f, i): f 
+                          for i, f in enumerate(id_files, 1)}
+                
+                with tqdm(total=total_files, desc="Processing") as pbar:
+                    for future in as_completed(futures):
+                        try:
+                            future.result()
+                        except Exception as e:
+                            logging.error(f"Thread error: {str(e)}")
+                        finally:
+                            completed += 1
+                            if completed % self.step == 0:
+                                self.save_coverage()
+                            pbar.update(1)
+        else:
+            # 顺序处理（固定端口）
+            with tqdm(total=total_files, desc="Processing") as pbar:
+                for i, test_file in enumerate(id_files, 1):
+                    self._process_single_test(test_file, i)
+                    pbar.update(1)
         
-        if record:
-            self._record_coverage(test_file)
+        # 最终保存
+        self.save_coverage()
+
+    def _process_single_test(self, test_file, count):
+        """处理单个测试用例（线程安全）"""
+        try:
+            self._run_test_case(test_file)
+            
+            if count % self.step == 0:
+                with self.lock:
+                    self._record_coverage(test_file)
+        except Exception as e:
+            logging.error(f"Failed {test_file}: {str(e)}")
+            self.skipped_log.append(str(test_file))
 
     def _record_coverage(self, test_file):
-        """Record coverage data for a test file"""
-        timestamp = test_file.stat().st_mtime
+        """记录覆盖率数据（线程安全）"""
         coverage = self._run_gcovr()
-        
         if coverage:
+            timestamp = test_file.stat().st_mtime
             self.coverage_data.append({
                 "Time": timestamp,
                 "l_per": coverage["lines_per"],
@@ -128,63 +238,55 @@ class CoverageCollector:
             })
 
     def save_coverage(self):
-        """Save collected coverage data to CSV"""
-        if not self.coverage_data:
-            print("Warning: No coverage data collected", file=sys.stderr)
-            return
-
-        try:
-            df = pd.DataFrame(self.coverage_data)
-            df.to_csv(self.covfile, mode='a', header=False, index=False)
-            self.coverage_data.clear()  # 清空已保存数据
-        except Exception as e:
-            print(f"Error saving coverage data: {str(e)}", file=sys.stderr)
+        """保存覆盖率数据（线程安全）"""
+        with self.lock:
+            if not self.coverage_data:
+                return
+            
+            try:
+                df = pd.DataFrame(self.coverage_data)
+                df.to_csv(self.covfile, mode='a', header=False, index=False)
+                self.coverage_data.clear()
+            except Exception as e:
+                logging.error(f"Save failed: {str(e)}")
 
     def save_skipped_log(self, log_path="skipped_tests.log"):
-        """将跳过的测试用例写入日志文件"""
+        """保存跳过的测试用例"""
         if self.skipped_log:
             with open(log_path, 'w') as f:
-                for test in self.skipped_log:
-                    f.write(f"{test}\n")
-            logging.info(f"Skipped {len(self.skipped_log)} test cases. See '{log_path}' for details.")
-        else:
-            logging.info("No skipped test cases.")
-
+                f.write("\n".join(self.skipped_log))
+            logging.info(f"Saved {len(self.skipped_log)} skipped cases to {log_path}")
 
 def main():
-    conf_path = 'conf.json'
+    try:
+        with open('conf.json') as f:
+            config = json.load(f)
+        
+        collector = CoverageCollector(
+            folder=config['output_dir'],
+            port=4433,
+            step=config['coverage']['step'],
+            covfile=os.path.join(config['output_dir'], 'coverage.csv'),
+            target_cmd=config['coverage']['target_cmd'],
+            work_dir=config['coverage']['work_dir'],
+            parallel=config['coverage'].get('parrallel', 'False').lower() == 'true'
+        )
 
-    with open(conf_path, 'r', encoding='utf-8') as f:
-        config = json.load(f)
-
-    out_dir = config['output_dir']
-    covfile_path = os.path.join(out_dir, 'coverage.csv')
-    step = config['coverage']['step']
-    target_cmd = config['coverage']['target_cmd']
-    work_dir = config['coverage']['work_dir']
-    
-    collector = CoverageCollector(
-        folder=out_dir,
-        port=4433,
-        step=step,
-        covfile=covfile_path,
-        target_cmd=target_cmd,
-        work_dir=work_dir
-    )
-
-    print("Initializing coverage collection...")
-    collector.initialize()
-    
-    print("Processing test files...")
-    collector.process_files()
-    
-    print("Saving coverage data...")
-    collector.save_coverage()
-
-    print("Saving skipped tests log...")
-    collector.save_skipped_log()
-    
-    print("Coverage collection completed!")
+        logging.info("Initializing...")
+        collector.initialize()
+        
+        logging.info("Processing test files...")
+        collector.process_files()
+        
+        logging.info("Saving results...")
+        collector.save_skipped_log()
+        
+        logging.info("Coverage collection completed!")
+    except Exception as e:
+        logging.critical(f"Fatal error: {str(e)}", exc_info=True)
+        sys.exit(1)
 
 if __name__ == "__main__":
     main()
+
+    

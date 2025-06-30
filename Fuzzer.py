@@ -21,6 +21,9 @@ from line_profiler import LineProfiler,profile
 import random
 import copy,os
 from typing import List
+import numpy as np
+
+from numba import jit
 
 
 class FaultCode(Enum):
@@ -176,6 +179,15 @@ class Mutator:
 
 
 
+
+
+    @jit(nopython=True)
+    def flip_single_bit_numba(msg):
+        """使用Numba加速的版本"""
+        bit_pos = random.randint(0, len(msg) * 8 - 1)
+        byte_pos = bit_pos // 8
+        bit_in_byte = bit_pos % 8
+        msg[byte_pos] ^= (1 << (7 - bit_in_byte))
 
     def interesting_8(self, msg: bytearray) -> None:
         """ 用特殊值替换随机字节 """
@@ -488,6 +500,19 @@ class Mutator:
         messages_len = len(messages) 
 
 
+class DynamicLCG:
+    def __init__(self, seed=None):
+        self.state = seed or random.randint(0, 2**32-1)
+    
+    def rand_range(self, start, end):
+        """生成start到end-1的随机数"""
+        if start >= end:
+            return start
+        # 更新状态 (ANSI C参数)
+        self.state = (1103515245 * self.state + 12345) & 0x7fffffff
+        return start + self.state % (end - start)
+
+
 
 class Fuzzer():
     
@@ -547,6 +572,8 @@ class Fuzzer():
         
         self.pending_favored = 0 # Pending favored paths 
         self.havoc_div = 1
+
+        self.lcg = DynamicLCG()
 
 
 
@@ -900,8 +927,8 @@ class Fuzzer():
 
 
     def calculate_score(self,test_case:TestCase):
-        avg_exec_us = self.total_cal_us / self.cal_cycles
-        avg_bitmap_size = self.total_bitmap_size / self.total_bitmap_entries
+        avg_exec_us = self.total_cal_us / self.cal_cycles if self.cal_cycles else 0
+        avg_bitmap_size = self.total_bitmap_size / self.total_bitmap_entries if self.total_bitmap_entries else 0
 
         exec_us = test_case.exec_us
         bitmap_size = test_case.bitmap_size
@@ -952,11 +979,9 @@ class Fuzzer():
 
 
         
-
+    
     def fuzz_one(self):
         
-
-
         if self.pending_favored:
             if self.current_test_case.was_fuzzed:
                 if random.randint(0,100) < self.SKIP_TO_NEW_PROB:
@@ -965,7 +990,7 @@ class Fuzzer():
         self.current_test_case.was_fuzzed = 1
         mutated_messages = copy.deepcopy(self.current_test_case.messages)
         start_fuzz_msg_index = random.randint(0,len(mutated_messages) - 1)
-        end_fuzz_msg_index = random.randint(start_fuzz_msg_index,len(mutated_messages) - 1)
+        end_fuzz_msg_index = random.randint(start_fuzz_msg_index,len(mutated_messages) )
 
         
 
@@ -978,14 +1003,68 @@ class Fuzzer():
         while cur_stage < stage_max:
             
             mutation_times = random.choice([1,2,4,8,16,32,64,128])
+            msg_indexs = np.random.randint(low=start_fuzz_msg_index, high=end_fuzz_msg_index, size=mutation_times)
             for i in range(mutation_times):
-                msg_index = random.randint(start_fuzz_msg_index,end_fuzz_msg_index)
+                msg_index = msg_indexs[i]
 
                 self.mutator.mutate(mutated_messages,msg_index)
 
             cur_stage += 1
 
         self.common_fuzz_stuff(mutated_messages)
+
+
+    @profile
+    def fuzz_one_for_profile(self):
+        
+        
+        if self.pending_favored:
+            if self.current_test_case.was_fuzzed:
+                if random.randint(0,100) < self.SKIP_TO_NEW_PROB:
+                    return 1
+        
+        self.current_test_case.was_fuzzed = 1
+        mutated_messages = copy.deepcopy(self.current_test_case.messages)
+        start_fuzz_msg_index = random.randint(0,len(mutated_messages) - 1)
+        end_fuzz_msg_index = random.randint(start_fuzz_msg_index,len(mutated_messages) )
+
+        # print(start_fuzz_msg_index)
+        # print(end_fuzz_msg_index)
+
+
+        # perf_score = self.calculate_score(self.current_test_case)
+        perf_score = self.HAVOC_MAX_MULT * 100
+        perf_score = self.HAVOC_MAX_MULT * 100
+
+        
+        stage_max = int(self.HAVOC_CYCLES_INIT * perf_score / 10 / 100 )
+        # print(stage_max)
+        cur_stage = 0
+        while cur_stage < stage_max:
+            
+            mutation_times = random.choice([1,2,4,8,16,32,64,128])
+            for i in range(mutation_times):
+                # for speed use lcg
+                msg_index = self.lcg.rand_range(start_fuzz_msg_index, end_fuzz_msg_index)
+
+                self.mutator.mutate(mutated_messages,msg_index)
+
+            cur_stage += 1
+
+        self.common_fuzz_stuff(mutated_messages)
+
+    def fuzz_one_profile(self):
+        
+        profiler = LineProfiler()
+        profiler.add_function(self.fuzz_one_for_profile)  # 添加要分析的函数
+
+        # 运行分析
+        profiler.enable_by_count()
+        result = self.fuzz_one_for_profile()
+        profiler.disable_by_count()
+
+        # 打印结果
+        profiler.print_stats(output_unit=1e-3)
 
     def choose_test_case(self):
         if self.current_queue_idx +1 == len(self.queue):
