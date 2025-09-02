@@ -28,8 +28,8 @@ fuzzer.fuzz_one_profile()
 # fuzzer.save_pcap(messages,responses)
 
 
-# fuzzer.perform_dry_run()
+fuzzer.perform_dry_run()
 
-# fuzzer.fuzz()
+fuzzer.fuzz()
 
 fuzzer.clear()

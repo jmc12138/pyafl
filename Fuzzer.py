@@ -166,7 +166,6 @@ class Mutator:
         return random.randint(0, len(data) - width)
 
 
-
     def flip_single_bit(self, msg: bytearray) -> None:
         """翻转单个比特位"""
 
@@ -575,6 +574,7 @@ class Fuzzer():
         out_parent_dir = self.config['output_dir']
         self.favor_test_cases_dir = os.path.join(out_parent_dir,'favor_test_cases')
         self.queue_dir = os.path.join(out_parent_dir,'queue')
+        self.origin_queue_dir = os.path.join(out_parent_dir,'origin_queue')
         self.crash_test_cases_dir = os.path.join(out_parent_dir,'crash_test_cases')
         self.tmout_test_cases_dir = os.path.join(out_parent_dir,'tmout_test_cases')
 
@@ -582,6 +582,7 @@ class Fuzzer():
         os.makedirs(self.crash_test_cases_dir,exist_ok=True)
         os.makedirs(self.tmout_test_cases_dir,exist_ok=True)
         os.makedirs(self.queue_dir,exist_ok=True)
+        os.makedirs(self.origin_queue_dir,exist_ok=True)
 
 
         
@@ -982,8 +983,10 @@ class Fuzzer():
         
         self.current_test_case.was_fuzzed = 1
         mutated_messages = copy.deepcopy(self.current_test_case.messages)
-        start_fuzz_msg_index = random.randint(0,len(mutated_messages) - 1)
-        end_fuzz_msg_index = random.randint(start_fuzz_msg_index,len(mutated_messages) )
+        if not mutated_messages:
+            return
+        indices = sorted(random.sample(range(len(mutated_messages)), 2))
+        start_fuzz_msg_index, end_fuzz_msg_index = indices[0], indices[1]
 
         
 

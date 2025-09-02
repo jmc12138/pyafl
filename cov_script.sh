@@ -29,6 +29,7 @@ echo "Time,l_per,l_abs,b_per,b_abs" >> $covfile
 #   replayer="aflnet-replay"
 # fi
 testdir="replayable-queue"
+# testdir="in-tls"
 replayer="aflnet-replay"
 #process seeds first
 for f in $(echo $folder/$testdir/*.raw); do 
