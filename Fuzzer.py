@@ -820,7 +820,7 @@ class Fuzzer():
         pyafl.clear()
 
     def calibrate_case(self,test_case:TestCase,handicap = 0):
-        
+
         first_run = not test_case.cksum
         stage_max = 7
         first_trace = None
@@ -829,6 +829,7 @@ class Fuzzer():
         self.stats.stage_name = "calibration"
 
         start_time_us = utils.get_cur_time_us()
+
 
         for i in range(stage_max):
 
@@ -851,16 +852,21 @@ class Fuzzer():
                 else:
                     test_case.cksum = cksum
 
-    
+  
         stop_time_us = utils.get_cur_time_us()
 
         self.total_cal_us += stop_time_us - start_time_us
         self.cal_cycles += stage_max
 
         test_case.exec_us = (stop_time_us - start_time_us) / stage_max
+
+
         test_case.bitmap_size = pyafl.trace_bytes_count()
         test_case.handicap = handicap
+ 
+
         test_case.trace_mini_hash = pyafl.trace_min_hash32()
+
 
 
         self.total_bitmap_size += test_case.bitmap_size
@@ -908,9 +914,10 @@ class Fuzzer():
         for test_case in self.init_test_cases:
             print(f"Attempting dry run with {test_case.file_path}")
             Fault = self.calibrate_case(test_case,0)
-
+            print("0000000000")
             if(test_case.var_behavior):
                 print("warning: Instrumentation output varies across runs.")
+
 
             # test_case.show_status()
     
@@ -918,7 +925,6 @@ class Fuzzer():
     def handle_interrupt(self, signum, frame):
         print("\n[!] 检测到中断信号，正在停止...")
         self.running = False
-
 
     def calculate_score(self,test_case:TestCase):
         avg_exec_us = self.total_cal_us / self.cal_cycles if self.cal_cycles else 0

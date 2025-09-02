@@ -8709,8 +8709,11 @@ u8 src_for_trace_min[MAP_SIZE >> 3];
 
 u32 __trace_min_hash32(){
   
+
   minimize_bits(src_for_trace_min, trace_bits);
-  return  hash32(src_for_trace_min, MAP_SIZE, HASH_CONST);
+
+
+  return  hash32(src_for_trace_min, MAP_SIZE >> 3, HASH_CONST);
 }
 
 void __simplify_trace_bits(){
