@@ -21,6 +21,7 @@ afl-gotcpu
 afl-showmap
 afl-tmin
 afl-python
+aflnet-replay
 as
 
 # Binaries produced by "make -C llvm_mode"
