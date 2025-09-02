@@ -24,7 +24,7 @@ MISC_PATH   = $(PREFIX)/share/afl
 
 # PROGS intentionally omit afl-as, which gets installed elsewhere.
 
-PROGS       = afl-gcc afl-fuzz afl-showmap afl-tmin afl-gotcpu afl-analyze afl-python
+PROGS       = afl-gcc afl-fuzz afl-showmap afl-tmin afl-gotcpu afl-analyze afl-python aflnet-replay
 SH_PROGS    = afl-plot afl-cmin afl-whatsup
 
 CFLAGS     ?= -O3 -funroll-loops
@@ -33,7 +33,7 @@ CFLAGS     += -Wall -D_FORTIFY_SOURCE=2 -g -Wno-pointer-sign \
 	      -DBIN_PATH=\"$(BIN_PATH)\"
 
 ifneq "$(filter Linux GNU%,$(shell uname))" ""
-  LDFLAGS  += -ldl -lcjson
+  LDFLAGS  += -ldl -lcjson  -lgvc -lcgraph -lm
 endif
 
 ifeq "$(findstring clang, $(shell $(CC) --version 2>/dev/null))" ""
@@ -88,6 +88,9 @@ afl-gotcpu: afl-gotcpu.c $(COMM_HDR) | test_x86
 # 修改PROGS定义，确保afl-python使用正确的链接库
 afl-python: afl-python.c $(COMM_HDR) | test_x86
 	$(CC) $(CFLAGS) $@.c -o $@ $(LDFLAGS) 
+
+aflnet-replay: aflnet-replay.c $(COMM_HDR) | test_x86
+	$(CC) $(CFLAGS) aflnet-replay.c -o aflnet-replay $(LDFLAGS)
 
 ifndef AFL_NO_X86
 

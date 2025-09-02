@@ -1,4 +1,5 @@
 #!/bin/bash
+# ./cov_script.sh /home/ubuntu/experiments/out-openssl-pyafl 4433 50 /home/ubuntu/pyafl/pyafl-openssl.csv
 
 folder=$1   #fuzzer result folder
 pno=$2      #port number
@@ -28,25 +29,25 @@ echo "Time,l_per,l_abs,b_per,b_abs" >> $covfile
 #   testdir="queue"
 #   replayer="aflnet-replay"
 # fi
-testdir="replayable-queue"
+testdir="queue"
 # testdir="in-tls"
-replayer="aflnet-replay"
+replayer="/home/ubuntu/pyafl/aflnet-replay"
 #process seeds first
-for f in $(echo $folder/$testdir/*.raw); do 
-  time=$(stat -c %Y $f)
+# for f in $(echo $folder/$testdir/*.raw); do 
+#   time=$(stat -c %Y $f)
     
-  $replayer $f TLS $pno 100 > /dev/null 2>&1 &
-  timeout -k 0 3s ./apps/openssl s_server -key key.pem -cert cert.pem -4 -naccept 1 -no_anti_replay > /dev/null 2>&1
+#   $replayer $f TLS $pno 100 > /dev/null 2>&1 &
+#   timeout -k 0 3s ./apps/openssl s_server -key key.pem -cert cert.pem -4 -naccept 1 -no_anti_replay > /dev/null 2>&1
   
-  wait
-  cov_data=$(gcovr -r . -s | grep "[lb][a-z]*:")
-  l_per=$(echo "$cov_data" | grep lines | cut -d" " -f2 | rev | cut -c2- | rev)
-  l_abs=$(echo "$cov_data" | grep lines | cut -d" " -f3 | cut -c2-)
-  b_per=$(echo "$cov_data" | grep branch | cut -d" " -f2 | rev | cut -c2- | rev)
-  b_abs=$(echo "$cov_data" | grep branch | cut -d" " -f3 | cut -c2-)
+#   wait
+#   cov_data=$(gcovr -r . -s | grep "[lb][a-z]*:")
+#   l_per=$(echo "$cov_data" | grep lines | cut -d" " -f2 | rev | cut -c2- | rev)
+#   l_abs=$(echo "$cov_data" | grep lines | cut -d" " -f3 | cut -c2-)
+#   b_per=$(echo "$cov_data" | grep branch | cut -d" " -f2 | rev | cut -c2- | rev)
+#   b_abs=$(echo "$cov_data" | grep branch | cut -d" " -f3 | cut -c2-)
   
-  echo "$time,$l_per,$l_abs,$b_per,$b_abs" >> $covfile
-done
+#   echo "$time,$l_per,$l_abs,$b_per,$b_abs" >> $covfile
+# done
 
 #process other testcases
 count=0

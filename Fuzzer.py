@@ -1074,10 +1074,8 @@ class Fuzzer():
         last_time = start_time
         last_exec = 0
 
-
-        
         while self.running:
-            
+
             self.choose_test_case()
             # 运行测试用例并计数
             self.fuzz_one()
@@ -1114,7 +1112,7 @@ class Fuzzer():
             test_case_path = os.path.join(self.queue_dir,f"id:{self.stats.queue_len:06d}.raw")
             self.stats.queue_len += 1
 
-            self.save_intersting_test_case(messages, test_case_path) 
+            self.save_interesting_test_case(messages, test_case_path) 
             test_case = TestCase(messages=messages, file_path=test_case_path)
             test_case.depth = self.current_test_case.depth + 1
             if hub == 2 and not test_case.has_new_cov:
@@ -1131,7 +1129,7 @@ class Fuzzer():
                 test_case_path = os.path.join(self.favor_test_cases_dir,f"id:{self.stats.unique_favors:06d}.raw")
                 self.stats.unique_favors += 1
 
-                self.save_intersting_test_case(messages, test_case_path) 
+                self.save_interesting_test_case(messages, test_case_path) 
 
 
             self.queue.append(test_case)
@@ -1160,7 +1158,7 @@ class Fuzzer():
                 if new_fault != FaultCode.TMOUT:
                     return keeping
 
-            self.save_intersting_test_case(messages, os.path.join(self.tmout_test_cases_dir,f"id:{self.stats.unique_hangs:06d}.raw"))
+            self.save_interesting_test_case(messages, os.path.join(self.tmout_test_cases_dir,f"id:{self.stats.unique_hangs:06d}.raw"))
 
             self.stats.unique_hangs += 1
             self.stats.last_hang_time = datetime.now()
@@ -1179,7 +1177,7 @@ class Fuzzer():
             if not self.stats.unique_crashes:
                 pass
 
-            self.save_intersting_test_case(messages, os.path.join(self.crash_test_cases_dir,f"id:{self.stats.unique_crashes:06d}.raw"))
+            self.save_interesting_test_case(messages, os.path.join(self.crash_test_cases_dir,f"id:{self.stats.unique_crashes:06d}.raw"))
         
             self.stats.unique_crashes += 1
 
@@ -1195,15 +1193,22 @@ class Fuzzer():
 
 
         
-    def save_intersting_test_case(self ,messages ,path):
-
-
-
-
+    def save_interesting_test_case(self, messages, path):
+        """
+        将messages列表保存为AFLNet兼容的.raw文件格式
+        格式: [4字节长度(小端)][数据][4字节长度][数据]...
+        
+        Args:
+            messages: 列表，每个元素是bytes类型的协议消息
+            path: 输出文件路径
+        """
         with open(path, 'wb') as f:
-            f.write(b"".join(messages))
-
-        pass
+            for msg in messages:
+                # 写入4字节长度（小端序）
+                length = len(msg)
+                f.write(length.to_bytes(4, byteorder='little', signed=False))
+                # 写入原始数据
+                f.write(msg)
 
 
     def common_fuzz_stuff(self, messages:List[bytearray]):

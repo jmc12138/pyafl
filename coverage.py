@@ -112,6 +112,7 @@ class CoverageCollector:
         with self.covfile.open('a') as f:
             f.write(f"{timestamp},{l_per},{l_abs},{b_per},{b_abs}\n")
 
+# python3 ./coverage.py 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("folder", help="Fuzzer result folder")
