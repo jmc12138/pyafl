@@ -54,8 +54,14 @@ class Stats:
         self.stage_name = 0
 
         self.queued_with_cov = 0
+        self.current_queued_with_cov = 0
+
 
         self.queue_cycle = 0
+
+        # self.
+
+
 
 class TestCase:
     def __init__(self,file_path , messages):
@@ -566,8 +572,9 @@ class Fuzzer():
         self.havoc_div = 1
 
         self.lcg = DynamicLCG()
-
-
+        # 是否启用splice 变异
+        self.splice = False
+        # self.splice = True
 
 
     def init_out_dir(self):
@@ -914,7 +921,6 @@ class Fuzzer():
         for test_case in self.init_test_cases:
             print(f"Attempting dry run with {test_case.file_path}")
             Fault = self.calibrate_case(test_case,0)
-            print("0000000000")
             if(test_case.var_behavior):
                 print("warning: Instrumentation output varies across runs.")
 
@@ -978,6 +984,115 @@ class Fuzzer():
 
 
 
+    def splice_msgs(self, msg1: List[bytearray]):
+            """
+            跨消息字节级拼接：
+            1. 将 msg1 和 msg2 视为全局字节流
+            2. 找出全局字节差异区间 [start_byte, end_byte]
+            3. 在差异区间内随机选一个全局拼接点
+            4. 生成新序列：msg1 前半 + msg2 后半（在字节级别）
+            """
+            if not msg1 or len(self.queue) < 2:
+                return
+
+            # 预计算 msg1 的总字节和消息边界
+            total1 = bytearray()
+            offsets1 = [0]  # 每个消息的起始偏移
+            for m in msg1:
+                total1.extend(m)
+                offsets1.append(len(total1))
+
+            MAX_RETRIES = 15
+            attempts = 0
+
+            while attempts < MAX_RETRIES:
+                attempts += 1
+                msg2 = self.queue[self.lcg.rand_range(0,len(self.queue))].messages
+                if not msg2:
+                    continue
+
+                # 构建 msg2 的总字节流
+                total2 = bytearray()
+                offsets2 = [0]
+                for m in msg2:
+                    total2.extend(m)
+                    offsets2.append(len(total2))
+
+                total_len = max(len(total1), len(total2))
+                if total_len == 0:
+                    continue
+
+                # === Step 1: 找全局字节差异起点 ===
+                start_byte = 0
+                min_len = min(len(total1), len(total2))
+                while start_byte < min_len and total1[start_byte] == total2[start_byte]:
+                    start_byte += 1
+
+                if start_byte == min_len and len(total1) == len(total2):
+                    continue  # 完全相同
+
+                # === Step 2: 找全局字节差异终点 ===
+                end_byte = total_len - 1
+                while end_byte >= start_byte:
+                    b1 = total1[end_byte] if end_byte < len(total1) else None
+                    b2 = total2[end_byte] if end_byte < len(total2) else None
+                    if b1 != b2:
+                        break
+                    end_byte -= 1
+
+                if end_byte < start_byte:
+                    continue
+
+                # 差异字节数至少为 2？
+                if end_byte - start_byte < 1:
+                    continue
+
+                # === Step 3: 在 [start_byte, end_byte] 内随机选拼接点 ===
+                splice_byte = start_byte + self.lcg.rand_range(0, end_byte - start_byte)
+
+                # === Step 4: 找到 splice_byte 在 msg1 和 msg2 中对应的消息索引和偏移 ===
+                # 在 msg1 中定位
+                msg1_idx = 0
+                while msg1_idx < len(offsets1) - 1 and offsets1[msg1_idx + 1] <= splice_byte:
+                    msg1_idx += 1
+                if msg1_idx >= len(msg1):
+                    msg1_idx = len(msg1) - 1
+
+                # 在 msg2 中定位
+                msg2_idx = 0
+                while msg2_idx < len(offsets2) - 1 and offsets2[msg2_idx + 1] <= splice_byte:
+                    msg2_idx += 1
+                if msg2_idx >= len(msg2):
+                    msg2_idx = len(msg2) - 1
+
+                # 计算在各自消息中的偏移
+                byte_offset_in_msg1 = splice_byte - offsets1[msg1_idx] if msg1_idx < len(offsets1) - 1 else splice_byte - offsets1[-2]
+                byte_offset_in_msg2 = splice_byte - offsets2[msg2_idx] if msg2_idx < len(offsets2) - 1 else splice_byte - offsets2[-2]
+
+                # 限制偏移不越界
+                byte_offset_in_msg1 = max(0, min(byte_offset_in_msg1, len(msg1[msg1_idx])))
+                byte_offset_in_msg2 = max(0, min(byte_offset_in_msg2, len(msg2[msg2_idx])))
+
+                # === Step 5: 构造新消息序列 ===
+                result = []
+
+                # 1. 添加 msg1 中拼接点之前的所有完整消息
+                for i in range(msg1_idx):
+                    result.append(bytearray(msg1[i]))
+
+                # 2. 构造混合消息（msg1[msg1_idx] 前半 + msg2[msg2_idx] 后半）
+                part1 = msg1[msg1_idx][:byte_offset_in_msg1]
+                part2 = msg2[msg2_idx][byte_offset_in_msg2:]
+                mixed_msg = bytearray(part1 + part2)
+                result.append(mixed_msg)
+
+                # 3. 添加 msg2 中拼接点之后的所有完整消息
+                for i in range(msg2_idx + 1, len(msg2)):
+                    result.append(bytearray(msg2[i]))
+
+                msg1 = result
+
+
         
     
     def fuzz_one(self):
@@ -1000,8 +1115,19 @@ class Fuzzer():
         perf_score = self.calculate_score(self.current_test_case)
 
     
-        stage_max = int(self.HAVOC_CYCLES_INIT * perf_score / 100 )
+        stage_max = int(self.HAVOC_CYCLES_INIT * perf_score / 10 )
         cur_stage = 0
+
+        self.stats.stage_name = "havoc"
+
+
+        if self.splice:
+            self.stats.stage_name = "splice"
+            
+            self.splice_msgs(mutated_messages)
+
+
+
         while cur_stage < stage_max:
             
             mutation_times = random.choice([1,2,4,8,16,32,64,128])
@@ -1012,6 +1138,9 @@ class Fuzzer():
                 self.mutator.mutate(mutated_messages,msg_index)
 
             cur_stage += 1
+        
+
+
 
         self.common_fuzz_stuff(mutated_messages)
 
@@ -1071,6 +1200,15 @@ class Fuzzer():
     def choose_test_case(self):
         if self.current_queue_idx +1 == len(self.queue):
             self.stats.queue_cycle += 1
+
+            # 检测这一轮是否有新的测试用例被发现
+            if not self.stats.current_queued_with_cov:
+                self.splice = True
+            else:
+                self.splice = False
+            
+            self.stats.current_queued_with_cov = 0
+
         self.current_queue_idx = (self.current_queue_idx + 1) % len(self.queue)
         self.current_test_case = self.queue[self.current_queue_idx] 
 
@@ -1100,7 +1238,7 @@ class Fuzzer():
                 
                 # 打印速率信息
                 print(f"[PERF] Current: {execs_per_second:.1f} execs/sec | "
-                    f"Total: {self.stats.total_exec} execs")
+                    f"Total: {self.stats.total_exec} execs | cycles : {self.stats.queue_cycle}")
                 
                 # 重置计数器和时间戳
                 last_time = current_time
@@ -1115,7 +1253,7 @@ class Fuzzer():
             if not hub:
                 return 0
             
-            test_case_path = os.path.join(self.queue_dir,f"id:{self.stats.queue_len:06d}.raw")
+            test_case_path = os.path.join(self.queue_dir,f"id:{self.stats.queue_len:06d}_{self.stats.stage_name}.raw")
             self.stats.queue_len += 1
 
             self.save_interesting_test_case(messages, test_case_path) 
@@ -1124,6 +1262,7 @@ class Fuzzer():
             if hub == 2 and not test_case.has_new_cov:
                 test_case.has_new_cov = 1
                 self.stats.queued_with_cov += 1
+                self.stats.current_queued_with_cov += 1
 
 
 
