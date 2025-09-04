@@ -1118,18 +1118,24 @@ class Fuzzer():
         stage_max = int(self.HAVOC_CYCLES_INIT * perf_score / 100 )
         cur_stage = 0
 
-        self.stats.stage_name = "havoc"
+
 
 
         if self.splice:
-            self.stats.stage_name = "splice"
+
             
             self.splice_msgs(mutated_messages)
 
 
 
         while cur_stage < stage_max:
-            
+
+
+            if self.splice:
+                self.stats.stage_name = "splice"
+            else:
+                self.stats.stage_name = "havoc"
+
             mutation_times = random.choice([1,2,4,8,16,32,64,128])
             msg_indexs = np.random.randint(low=start_fuzz_msg_index, high=end_fuzz_msg_index, size=mutation_times)
             for i in range(mutation_times):
@@ -1202,7 +1208,7 @@ class Fuzzer():
             self.stats.queue_cycle += 1
 
             # 检测这一轮是否有新的测试用例被发现
-            if not self.stats.current_queued_with_cov:
+            if not self.stats.current_queued_with_cov and len(self.queue) > 10:
                 self.splice = True
             else:
                 self.splice = False
