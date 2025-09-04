@@ -1115,7 +1115,7 @@ class Fuzzer():
         perf_score = self.calculate_score(self.current_test_case)
 
     
-        stage_max = int(self.HAVOC_CYCLES_INIT * perf_score / 10 )
+        stage_max = int(self.HAVOC_CYCLES_INIT * perf_score / 100 )
         cur_stage = 0
 
         self.stats.stage_name = "havoc"
@@ -1142,7 +1142,7 @@ class Fuzzer():
 
 
 
-        self.common_fuzz_stuff(mutated_messages)
+            self.common_fuzz_stuff(mutated_messages)
 
 
     @profile
@@ -1214,9 +1214,9 @@ class Fuzzer():
 
     def fuzz(self):
         print("start fuzzing, WAAAAAAAAAGH!!!")
-        start_time = time.time()  # 记录fuzzing开始时间
-        last_time = start_time
-        last_exec = 0
+        self.start_time = time.time()  # 记录fuzzing开始时间
+        self.last_time = self.start_time
+        self.last_exec = 0
 
         while self.running:
 
@@ -1225,24 +1225,6 @@ class Fuzzer():
             self.fuzz_one()
 
 
-            
-            # 计算并显示每秒执行速率
-            current_time = time.time()
-            elapsed = current_time - last_time
-            
-            # 每秒更新一次统计数据
-            if elapsed >= 2.0:
-                # 计算当前时段的执行速度
-                execs_in_period = self.stats.total_exec - last_exec
-                execs_per_second = execs_in_period / elapsed
-                
-                # 打印速率信息
-                print(f"[PERF] Current: {execs_per_second:.1f} execs/sec | "
-                    f"Total: {self.stats.total_exec} execs | cycles : {self.stats.queue_cycle}")
-                
-                # 重置计数器和时间戳
-                last_time = current_time
-                last_exec = self.stats.total_exec
 
 
     def save_if_interesting(self, messages:List[bytearray], fault):
@@ -1364,6 +1346,24 @@ class Fuzzer():
         
 
 
+        
+        # 计算并显示每秒执行速率
+        current_time = time.time()
+        elapsed = current_time - self.last_time
+        
+        # 每秒更新一次统计数据
+        if elapsed >= 2.0:
+            # 计算当前时段的执行速度
+            execs_in_period = self.stats.total_exec - self.last_exec
+            execs_per_second = execs_in_period / elapsed
+            
+            # 打印速率信息
+            print(f"[PERF] Current: {execs_per_second:.1f} execs/sec | "
+                f"Total: {self.stats.total_exec} execs | cycles : {self.stats.queue_cycle}")
+            
+            # 重置计数器和时间戳
+            self.last_time = current_time
+            self.last_exec = self.stats.total_exec
 
 
     
