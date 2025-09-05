@@ -101,22 +101,20 @@ To test other protocols:
 1. Write a corresponding `config.json` file:
 
 ```json
-{
-    "name" : "openssl", 
-    "protocol": "TLS",  
-    "skip_deterministic": "True", 
-    "input_dir": "/home/ubuntu/experiments/in-tls", 
-    "extra": "/home/ubuntu/experiments/tls.dict", 
-    "output_dir": "/home/ubuntu/experiments/out-openssl-pyafl", 
-    "use_net": "tcp://127.0.0.1/4433", 
-    "server_wait": "10000", 
-    "terminate_child": "True", 
-    "poll_wait_msecs": "30", 
-    "exec_tmout": "5000+",  
-    "mem_limit": "none", 
-    "target_cmd": "/home/ubuntu/experiments/openssl/apps/openssl s_server -key /home/ubuntu/experiments/openssl/key.pem -cert /home/ubuntu/experiments/openssl/cert.pem -4 -naccept 1 -no_anti_replay", 
-    "dumb_mode": "False"
-}
+"name": "openssl",                   // Name of the protocol implementation
+"protocol": "TLS",                   // Protocol type
+"skip_deterministic": "True",        // Whether to skip deterministic mutations (can be ignored)
+"input_dir": "/home/ubuntu/experiments/in-tls",  // Input directory, same as in AFLnet
+"extra": "/home/ubuntu/experiments/tls.dict",    // Dictionary file, same as in AFLnet
+"output_dir": "/home/ubuntu/experiments/out-openssl-pyafl",  // Output directory, output content slightly modified
+"use_net": "tcp://127.0.0.1/4433",  // Network usage, same as in AFLnet
+"server_wait": "10000",              // Wait time for server startup (in milliseconds)
+"terminate_child": "True",           // Whether to kill child processes (leave unchanged if unsure)
+"poll_wait_msecs": "30",             // Maximum wait time per polling operation, i.e., max wait after sending each message
+"exec_tmout": "5000+",               // Maximum execution timeout (in milliseconds), '+' indicates soft timeout
+"mem_limit": "none",                 // Memory limit (set to "none" for no limit)
+"target_cmd": "/home/ubuntu/experiments/openssl/apps/openssl s_server -key /home/ubuntu/experiments/openssl/key.pem -cert /home/ubuntu/experiments/openssl/cert.pem -4 -naccept 1 -no_anti_replay",  // Command to start the target server
+"dumb_mode": "False"                 // Whether to run in dumb mode (no feedback from instrumentation)
 ```
 
 2. Extend protocol support by adding corresponding parsing code in `Fuzzer.py`. It's simple — you can even use a large language model to convert AFLnet's C code to Python. I haven't tested other protocols, so this isn't implemented yet.
