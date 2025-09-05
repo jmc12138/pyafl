@@ -1,7 +1,11 @@
 # PyAFL: 当协议模糊测试遇上Python之力
 
 > **专为研究者打造的 AFLnet「青春版」—— 告别 C 语言的折磨，拥抱 Python 的高效！**
+---
 
+[中文文档](README-zh.md) | [English Documentation](README.md)
+
+---
 
 我们基于[aflnet](https://github.com/aflnet/aflnet) 开发
 
