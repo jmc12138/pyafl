@@ -75,9 +75,9 @@ docker run -it openssl bash
 ```
 
 After installing the Dev Containers extension in VSCode, a red-framed icon will appear on the left sidebar  
-[alt text](pics/image.png)  
+![alt text](pics/image.png)  
 Click the small arrow next to "openssl"  
-[alt text](pics/image2.png)
+![alt text](pics/image2.png)
 
 **Note: Run `sudo usermod -aG docker $USER` to allow regular users to use Docker, otherwise the container may not appear in VSCode.**
 
