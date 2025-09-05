@@ -1,165 +1,180 @@
-# PyAFL: When Protocol Fuzzing Meets the Power of Python
+PyAFL: When Protocol Fuzzing Meets Python Power
 
-> **The "Lite Version" of AFLnet Built for Researchers — Say Goodbye to the Torment of C, Embrace the Efficiency of Python!**
+The "Lightweight Version" of AFLNet Designed for Researchers — Say Goodbye to the Torments of C Language, Embrace Python's Efficiency!
 
+We developed this project based on https://github.com/aflnet/aflnet
 
-
-[中文文档](README-zh.md) | [English Documentation](README.md)
-
-we use [aflnet](https://github.com/aflnet/aflnet) to develop
-
-```
 @inproceedings{AFLNet,
 author={Van{-}Thuan Pham and Marcel B{\"o}hme and Abhik Roychoudhury},
 title={AFLNet: A Greybox Fuzzer for Network Protocols},
 booktitle={Proceedings of the 13rd IEEE International Conference on Software Testing, Verification and Validation : Testing Tools Track},
 year={2020},}
-```
-## 🤔 Have You Ever Struggled Like This?
-
-- Spent two months studying **AFLnet**, finally grasping the essence of state machines, mutation, and feedback.
-- Countless innovative ideas popped into your head: **state selection algorithms**, **mutation strategies**, **power scheduling**...
-- But due to unfamiliarity with C, you were forced to battle **Segment Faults**, **memory leaks**, and **pointer errors** day and night.
-- Libraries taken for granted in Python like `numpy`, `pandas`, and `scikit-learn` are nowhere to be found in C.
-- Spent months implementing an idea, only to find it ineffective, with **half your graduate career already past**...
-- The next idea? Another few weeks or even months of development? **Time won't wait!**
-
-## 🎯 PyAFL is Born for You!
-
-**Yes, my friend, yes!**
-
-**PyAFL** fully implements the core logic of AFLnet but is built in **pure Python**, allowing you to:
-
-### ✨ Core Advantages
-- 🐍 **Pure Python Implementation** - Get started directly, no need to wrestle with C.
-- 🔧 **Seamless Integration with Python Ecosystem** - Plug and play with NumPy, Pandas, machine learning libraries, and more.
-- ⚡ **Rapid Prototyping and Validation** - Validate ideas in days, not months.
-- 🧠 **Focus on Algorithm Innovation** - Say goodbye to low-level debugging and focus on core research.
-- 📊 **Rich Data Analysis** - Easily record and analyze test results, with support for Jupyter visualization.
-
-## 🚀 Quick Start
-It is recommended to use the Docker environment for a smoother and safer experience.
-
-1.  **Environment Dependencies**
-
-    1.1 **Install Docker**
-
-    For Docker installation, refer to:
-    [https://blog.csdn.net/2301_82242351/article/details/138561820](https://blog.csdn.net/2301_82242351/article/details/138561820) (Chinese resource)
-
-    For Docker mirror source configuration, refer to:
-    [https://blog.csdn.net/u014390502/article/details/143472743](https://blog.csdn.net/u014390502/article/details/143472743) (Chinese resource)
-
-    Finally, run `docker run hello-world`. A successful run indicates installation is complete.
-
-    1.2 **Install VSCode**
-
-    Install the **Dev Containers** extension in VSCode.
-
-2.  **OpenSSL Fuzzing Example**
-
-    2.1 **Installation**
-    bash
-    git clone https://gitee.com/zhangph12138/pyafl-profuzzbench.git
-    cd pyafl-profuzzbench/TLS/openssl
-    docker build --progress=plain -t openssl .
 
 
-    2.2 **Running**
-    bash
-    docker run -it openssl bash
+🤔 Have You Ever Struggled Like This?
+
+• Spent two months studying AFLNet, finally understanding the essence of state machines, mutation, and feedback
+
+• Countless innovative ideas emerged: state selection algorithms, mutation strategies, energy scheduling...
+
+• But due to unfamiliarity with C language, forced to battle Segment Faults, memory leaks, and pointer errors day and night
+
+• Libraries taken for granted in Python like numpy, pandas, and scikit-learn are unavailable in C
+
+• Spent months implementing ideas only to find poor results, while half your graduate career has passed...
+
+• Next idea? Another few weeks or months of development? Time won't wait!
+
+🎯 PyAFL Was Born for You!
+
+Yes! My friend, yes!
+
+PyAFL fully implements AFLNet's core logic but is built with pure Python, enabling you to:
+
+✨ Core Advantages
+
+• 🐍 Pure Python Implementation - Get started directly without battling C language
+
+• 🔧 Seamless Python Ecosystem Integration - NumPy, Pandas, machine learning libraries ready to use
+
+• ⚡ Rapid Prototype Validation - Validate ideas in days, not months
+
+• 🧠 Focus on Algorithm Innovation - Bid farewell to low-level debugging, focus on core research
+
+• 📊 Rich Data Analysis - Easily record and analyze test results with Jupyter visualization support
+
+• ⚡ Extreme Performance Optimization - Uses Cython to call AFLNet's performance-sensitive code, implements algorithm logic in Python, with performance nearly matching native AFLNet
+
+🚀 Quick Start
+
+Recommend using Docker environment directly for a smoother and safer experience
+
+1. Environment Dependencies
+
+1.1 Install Docker
+
+Docker installation reference:
+https://blog.csdn.net/2301_82242351/article/details/138561820
+
+Docker mirror source configuration reference:
+https://blog.csdn.net/u014390502/article/details/143472743
+
+Finally, run docker run hello-world - success means installation is complete
+
+1.2 Install VSCode
+
+Download the Dev Containers extension
+
+2. OpenSSL Fuzz Example
+
+2.1 Installation
+
+git clone https://gitee.com/zhangph12138/pyafl-profuzzbench.git
+
+cd pyafl-profuzzbench/TLS/openssl
+docker build --progress=plain -t openssl .
 
 
-    Open VSCode. After installing the Dev Containers extension, you will see the icon highlighted in red on the left sidebar.
-    ![alt text](pics/image.png)
-    Click the small arrow next to the `openssl` container.
-    ![alt text](pics/image2.png)
+2.2 Running
 
-    **Note: You may need to run `sudo usermod -aG docker $USER` to allow your regular user account to use Docker, otherwise the container might not appear in VSCode.**
-
-    Open the directory `/home/ubuntu/pyafl`.
-
-    **Start Fuzzing:**
-    bash
-    python3 main.py ./configs/openssl.json
+docker run -it openssl bash
 
 
-    **Collect Coverage Information:**
-    bash
-    ./cov_script.sh /home/ubuntu/experiments/out-openssl-pyafl 4433 50 /home/ubuntu/pyafl/pyafl-openssl.csv
+Open VSCode. After installing Dev Containers, this icon will appear on the left side (highlighted in red in the image)
+!pics/image.png
+Click the small arrow next to openssl
+!pics/image2.png
 
-    Coverage data will be saved to `/home/ubuntu/pyafl/pyafl-openssl.csv`.
+Note: Need to run sudo usermod -aG docker $USER to allow regular users to use Docker, otherwise the container might not appear in VSCode
 
-3.  **How to Extend**
+Open the directory /home/ubuntu/pyafl
 
-    To test other protocols:
-    1.  You need to write a corresponding `config.json` file.
+Start fuzzing:
 
-    json
-    {
-        "name": "openssl", // Name of the protocol implementation
-        "protocol": "TLS", // Protocol type
-        "skip_deterministic": "True", // Whether to skip deterministic mutation (can usually be left as is)
-        "input_dir": "/home/ubuntu/experiments/in-tls", // Input directory (same as AFLnet)
-        "extra": "/home/ubuntu/experiments/tls.dict", // Dictionary file (same as AFLnet)
-        "output_dir": "/home/ubuntu/experiments/out-openssl-pyafl", // Output directory (output content differs slightly)
-        "use_net": "tcp://127.0.0.1/4433", // Network target (same as AFLnet)
-        "server_wait": "10000", // Server startup wait time (ms)
-        "terminate_child": "True", // Whether to terminate child processes (leave unchanged if unsure)
-        "poll_wait_msecs": "30", // Max wait time per polling operation (ms), i.e., max wait after sending a message
-        "exec_tmout": "5000+", // Maximum execution timeout (ms)
-        "mem_limit": "none", // Memory limit
-        "target_cmd": "/home/ubuntu/experiments/openssl/apps/openssl s_server -key /home/ubuntu/experiments/openssl/key.pem -cert /home/ubuntu/experiments/openssl/cert.pem -4 -naccept 1 -no_anti_replay", // Command to start the server
-        "dumb_mode": "False"
-    }
+python3 main.py ./configs/openssl.json
 
 
-    2.  You need to extend the protocol by implementing the corresponding parsing code. This is done in `Fuzzer.py` by adding new sections. It's straightforward – you can even use AI models to help convert AFLnet's corresponding C code to Python. (Note: Other protocols have not been tested by the author and are not implemented yet).
+Collect coverage information:
 
-    python
+./cov_script.sh /home/ubuntu/experiments/out-openssl-pyafl 4433 50 /home/ubuntu/pyafl/pyafl-openssl.csv
+
+
+Coverage saved to /home/ubuntu/pyafl/pyafl-openssl.csv
+
+3 How to Extend
+
+To test other protocols:
+1 Need to write corresponding config.json
+
+{
+    "name": "openssl", # Protocol implementation name
+    "protocol": "TLS", # Protocol type
+    "skip_deterministic": "True", # Whether to skip deterministic mutation (can be ignored)
+    "input_dir": "/home/ubuntu/experiments/in-tls", # Input directory (same as AFLNet)
+    "extra": "/home/ubuntu/experiments/tls.dict", # Dictionary (same as AFLNet)
+    "output_dir": "/home/ubuntu/experiments/out-openssl-pyafl", # Output directory (output content slightly different)
+    "use_net": "tcp://127.0.0.1/4433", # Network usage (same as AFLNet)
+    "server_wait": "10000", # Server startup wait time
+    "terminate_child": "True", # Whether to kill child processes (leave unchanged if unsure)
+    "poll_wait_msecs": "30", # Maximum wait time per polling operation, i.e., max wait time after sending each message
+    "exec_tmout": "5000+", # Maximum execution timeout
+    "mem_limit": "none", # Memory limit
+    "target_cmd": "/home/ubuntu/experiments/openssl/apps/openssl s_server -key /home/ubuntu/experiments/openssl/key.pem -cert /home/ubuntu/experiments/openssl/cert.pem -4 -naccept 1 -no_anti_replay", # Server startup command
+    "dumb_mode": "False"
+}
+
+
+2 Need to extend protocols, implement corresponding parsing code. Specifically, add sections in Fuzzer.py. It's simple - you can directly use AI models to convert AFLNet's corresponding C code to Python. (I haven't tested other protocols, so this hasn't been implemented yet)
+
             # Extract messages based on protocol type
             if self.config['protocol'] == "TLS":
                 messages = utils.extract_requests_tls(file_content)
 
 
-## 📖 Target Audience
+📖 Target Audience
 
-- 🔬 **Graduate Students in Security Research** - Make research more efficient and graduation smoother.
-- 🧑‍💻 **Beginners in Protocol Fuzzing** - Lower the learning barrier and speed up the onboarding process.
-- 🤖 **Machine Learning Security Researchers** - Easily integrate ML models into the fuzzing pipeline.
-- 🛠️ **Security Engineers Wanting to Quickly Validate Ideas** - Shorten the cycle from idea to validation.
+• 🔬 Graduate Students in Security Research - Make research more efficient, graduation smoother
 
-## 💡 Why Choose PyAFL?
+• 🧑💻 Protocol Fuzzing Beginners - Lower learning threshold, faster onboarding
 
-> "I spent two months understanding AFLnet and another three months wrestling with C.
-> Finally, with PyAFL, I validated my new algorithm idea in **just one week**.
-> This is the tool I needed!"
+• 🤖 Machine Learning Security Researchers - Easily integrate ML models into fuzzing workflow
 
-## 🌟 Project Status
+• 🛠️ Security Engineers Wanting to Quickly Validate Ideas - Shorten the cycle from idea to validation
 
-- ✅ Core functionality of AFLnet fully implemented.
-- ✅ TLS protocol implementation and OpenSSL case study completed.
-- ✅ Extensible architecture design.
-- 🚧 Development of support for more protocols ongoing.
-- 🚧 Development of advanced data analysis features ongoing.
+💡 Why Choose PyAFL?
 
-## TODO
+"I spent two months understanding AFLNet, and another three months battling C language.
 
-- Implement more protocol case studies.
-- Develop a more user-friendly interface.
+Finally, with PyAFL, I validated my new algorithm idea in just one week.
 
-## 🤝 Contributions and Support
+This is exactly the tool I needed!"
 
-**Contributions of code, ideas, and use cases are welcome!**
+🌟 Project Status
 
-Whether it's submitting an Issue, creating a Pull Request, or sharing your research case study,
-it is a great support to the project!
+• ✅ AFLNet core functionality fully implemented
 
----
+• ✅ TLS protocol implementation, OpenSSL case study completed
 
-**⭐ If this project helps you, please give us a Star!**
-**Your support is the greatest motivation for our continued development!**
+• ✅ Extensible architecture design
 
----
+• 🚧 More protocol support under development
 
-#ProtocolFuzzing #Python #AFLnet #CyberSecurity #OpenSourceResearch #GraduationTool
+• 🚧 Advanced data analysis features under development
+
+TODO
+
+• Implement more protocol case studies
+
+• More user-friendly interface design
+
+🤝 Contributions and Support
+
+Welcome code contributions, ideas, and use case sharing!
+
+Whether submitting Issues, creating Pull Requests, or sharing your research cases,
+it's all tremendous support for the project!
+
+⭐ If this project helps you, please give us a Star!
+Your support is the greatest motivation for our continued development!
+
+ProtocolFuzzing #Python #AFLNet #CyberSecurity #OpenSourceResearch #GraduationTool
