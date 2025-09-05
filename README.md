@@ -6,6 +6,15 @@
 
 [中文文档](README-zh.md) | [English Documentation](README.md)
 
+we use [aflnet](https://github.com/aflnet/aflnet) to develop
+
+```
+@inproceedings{AFLNet,
+author={Van{-}Thuan Pham and Marcel B{\"o}hme and Abhik Roychoudhury},
+title={AFLNet: A Greybox Fuzzer for Network Protocols},
+booktitle={Proceedings of the 13rd IEEE International Conference on Software Testing, Verification and Validation : Testing Tools Track},
+year={2020},}
+```
 ## 🤔 Have You Ever Struggled Like This?
 
 - Spent two months studying **AFLnet**, finally grasping the essence of state machines, mutation, and feedback.

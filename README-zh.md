@@ -2,6 +2,17 @@
 
 > **专为研究者打造的 AFLnet「青春版」—— 告别 C 语言的折磨，拥抱 Python 的高效！**
 
+
+我们基于[aflnet](https://github.com/aflnet/aflnet) 开发
+
+```
+@inproceedings{AFLNet,
+author={Van{-}Thuan Pham and Marcel B{\"o}hme and Abhik Roychoudhury},
+title={AFLNet: A Greybox Fuzzer for Network Protocols},
+booktitle={Proceedings of the 13rd IEEE International Conference on Software Testing, Verification and Validation : Testing Tools Track},
+year={2020},}
+```
+
 ## 🤔 你是否也曾这样挣扎过？
 
 - 潜心研读 **AFLnet** 两个月，终于理解了状态机、变异与反馈的精髓
